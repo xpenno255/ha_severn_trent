@@ -7,5 +7,5 @@
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "requirements": [],
-  "version": "1.2.0-beta"
+  "version": "1.2.0-beta1"
 }
