@@ -3,7 +3,7 @@
   "name": "Severn Trent Water",
   "codeowners": [],
   "config_flow": true,
-  "documentation": "https://github.com/yourusername/severn_trent",
+  "documentation": "https://github.com/xpenno255/severn_trent",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "requirements": [],
