@@ -9,12 +9,13 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 - **7-Day Average**: Monitor your average daily water usage over the past week
 - **Weekly Total**: See your total water consumption for the last 7 days
 - **Meter Reading**: Official cumulative meter readings with historical data and usage between readings
+- **Estimated Current Meter Reading**: Accurate estimate of your current meter position based on official reading + monthly usage
 - **Automatic Updates**: Data refreshes every hour
 - **Native Home Assistant Integration**: Full support for Home Assistant's sensor platform with proper units and device classes
 
 ## Requirements
 
-- Home Assistant 2025.1 or newer
+- Home Assistant 2023.1 or newer
 - A Severn Trent online account with smart meter
 - Your account email and password
 
@@ -27,7 +28,7 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 3. Click the three dots menu in the top right corner
 4. Select **"Custom repositories"**
 5. Add the repository:
-   - **Repository URL**: `https://github.com/xpenno255/ha_severn_trent`
+   - **Repository URL**: `https://github.com/yourusername/severn-trent-homeassistant`
    - **Category**: Integration
 6. Click **"Add"**
 7. Close the custom repositories dialog
@@ -86,7 +87,7 @@ The integration will authenticate and begin fetching your water usage data immed
 
 ## Sensors
 
-The integration creates four sensors:
+The integration creates five sensors:
 
 | Sensor | Description | Unit |
 |--------|-------------|------|
@@ -94,6 +95,7 @@ The integration creates four sensors:
 | `sensor.severn_trent_daily_average` | Average daily usage over 7 days | m³/d |
 | `sensor.severn_trent_weekly_total` | Total usage over 7 days | m³ |
 | `sensor.severn_trent_meter_reading` | Official cumulative meter reading | m³ |
+| `sensor.severn_trent_estimated_meter_reading` | Estimated current meter reading | m³ |
 
 ### Sensor Attributes
 
@@ -120,12 +122,36 @@ Each sensor includes additional attributes:
 - Average daily usage between readings
 - All historical readings
 
+**Estimated Meter Reading:**
+- Last official reading and date
+- Usage accumulated since official reading
+- Days since official reading
+- Number of monthly periods included
+- Estimation note
+
+## How the Estimated Meter Reading Works
+
+The estimated meter reading provides an accurate prediction of your current meter position:
+
+1. Starts with your last official meter reading (taken every ~6 months by Severn Trent)
+2. Adds monthly usage totals from your smart meter since that date
+3. Includes partial data for the current incomplete month
+
+**Example:**
+- Official reading: 272 m³ (October 1st, 2025)
+- September usage: 9.841 m³
+- October usage so far: 0.831 m³
+- Estimated current reading: 272 + 9.841 + 0.831 = 282.672 m³
+
+This gives you an accurate running total between official 6-monthly readings.
+
 ## Data Sources
 
-The integration uses two data sources:
+The integration uses three data sources:
 
 1. **Smart Meter Hourly Data**: Automated readings taken every hour, aggregated into daily totals for the past 7 days
-2. **Manual Meter Readings**: Official readings taken periodically (typically bi-annually) showing cumulative meter totals
+2. **Smart Meter Monthly Data**: Monthly usage totals for the past 12 months (includes partial current month)
+3. **Manual Meter Readings**: Official readings taken periodically (typically bi-annually) showing cumulative meter totals
 
 ## Troubleshooting
 
@@ -172,7 +198,7 @@ Then restart Home Assistant to see detailed logs.
 This integration uses the Kraken API platform (developed by Octopus Energy and used by Severn Trent). The API:
 - Uses GraphQL for data queries
 - Requires JWT authentication
-- Provides hourly water usage data from smart meters
+- Provides hourly, daily, and monthly water usage data from smart meters
 - Provides manual meter readings with historical data
 - Tokens expire after 15 minutes (automatically refreshed)
 
@@ -197,7 +223,8 @@ Note: Smart meter data has a delay - hourly readings aren't available immediatel
 - Hourly readings have a processing delay
 - "Yesterday" is the most recent complete day available
 - "Today" data is not available due to API limitations
-- Data is aggregated from hourly readings into daily totals
+- Hourly data is aggregated into daily totals
+- Monthly data includes partial data for incomplete months
 
 **Manual Meter Readings:**
 - Typically taken bi-annually by meter readers
@@ -234,6 +261,11 @@ This is an unofficial integration and is not affiliated with or endorsed by Seve
 For issues, questions, or feature requests, please open an issue on GitHub.
 
 ## Changelog
+
+### v1.2.0
+- Added estimated current meter reading sensor
+- Fetches monthly usage data (past 12 months) for accurate estimation
+- Improved calculation: official reading + monthly totals (including partial current month)
 
 ### v1.1.0
 - Added automatic discovery of account numbers

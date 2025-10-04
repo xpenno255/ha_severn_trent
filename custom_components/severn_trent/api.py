@@ -209,70 +209,98 @@ class SevernTrentAPI:
         try:
             # Get yesterday's data (since today's data isn't available yet)
             end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            start_date = end_date - timedelta(days=7)  # Get last 7 days
+            start_date = end_date - timedelta(days=7)  # Get last 7 days for daily data
             
-            _LOGGER.info("Fetching readings from %s to %s", start_date, end_date)
-            _LOGGER.debug("Using account: %s, MSPI: %s, Device: %s", 
-                         self.account_number, self.market_supply_point_id, self.device_id)
+            _LOGGER.info("Fetching daily readings from %s to %s", start_date, end_date)
             
             headers = {
                 "Authorization": self.token
             }
             
-            _LOGGER.info("Making request with headers: %s", {k: v[:30] + "..." if len(v) > 30 else v for k, v in headers.items()})
-            _LOGGER.debug("Full token: %s", self.token)
-            
-            request_payload = {
-                "query": SMART_METER_READINGS_QUERY,
-                "variables": {
-                    "accountNumber": self.account_number,
-                    "startAt": start_date.isoformat() + "Z",
-                    "endAt": end_date.isoformat() + "Z",
-                    "utilityFilters": [{
-                        "waterFilters": {
-                            "readingFrequencyType": "HOUR_INTERVAL",
-                            "marketSupplyPointId": self.market_supply_point_id,
-                            "deviceId": self.device_id
-                        }
-                    }]
-                },
-                "operationName": "SmartMeterReadings"
-            }
-            
-            _LOGGER.debug("Request payload: %s", request_payload)
-            
-            response = self.session.post(
+            # Fetch daily readings (last 7 days)
+            daily_response = self.session.post(
                 API_URL,
                 headers=headers,
-                json=request_payload
+                json={
+                    "query": SMART_METER_READINGS_QUERY,
+                    "variables": {
+                        "accountNumber": self.account_number,
+                        "startAt": start_date.isoformat() + "Z",
+                        "endAt": end_date.isoformat() + "Z",
+                        "utilityFilters": [{
+                            "waterFilters": {
+                                "readingFrequencyType": "HOUR_INTERVAL",
+                                "marketSupplyPointId": self.market_supply_point_id,
+                                "deviceId": self.device_id
+                            }
+                        }]
+                    },
+                    "operationName": "SmartMeterReadings"
+                }
             )
             
-            _LOGGER.debug("Smart meter readings response status: %s", response.status_code)
-            response.raise_for_status()
-            data = response.json()
+            daily_response.raise_for_status()
+            daily_data = daily_response.json()
             
-            # Log the full response for debugging
-            _LOGGER.debug("Smart meter readings full response: %s", json.dumps(data, indent=2))
-            
-            if "errors" in data:
-                _LOGGER.error("GraphQL errors: %s", data["errors"])
+            if "errors" in daily_data:
+                _LOGGER.error("GraphQL errors fetching daily data: %s", daily_data["errors"])
                 return {}
             
-            if "data" not in data or "account" not in data["data"]:
-                _LOGGER.error("Unexpected API response structure. Full response: %s", json.dumps(data, indent=2))
+            # Fetch monthly readings (last 12 months for estimation calculations)
+            monthly_start = end_date - timedelta(days=365)
+            _LOGGER.info("Fetching monthly readings from %s to %s", monthly_start, end_date)
+            
+            monthly_response = self.session.post(
+                API_URL,
+                headers=headers,
+                json={
+                    "query": SMART_METER_READINGS_QUERY,
+                    "variables": {
+                        "accountNumber": self.account_number,
+                        "startAt": monthly_start.isoformat() + "Z",
+                        "endAt": end_date.isoformat() + "Z",
+                        "utilityFilters": [{
+                            "waterFilters": {
+                                "readingFrequencyType": "MONTH_INTERVAL",
+                                "marketSupplyPointId": self.market_supply_point_id,
+                                "deviceId": self.device_id
+                            }
+                        }]
+                    },
+                    "operationName": "SmartMeterReadings"
+                }
+            )
+            
+            monthly_response.raise_for_status()
+            monthly_data = monthly_response.json()
+            
+            if "errors" in monthly_data:
+                _LOGGER.error("GraphQL errors fetching monthly data: %s", monthly_data["errors"])
+                # Continue with just daily data
+                monthly_measurements = []
+            else:
+                monthly_properties = monthly_data.get("data", {}).get("account", {}).get("properties", [])
+                if monthly_properties:
+                    monthly_measurements = monthly_properties[0].get("measurements", {}).get("edges", [])
+                else:
+                    monthly_measurements = []
+            
+            # Process daily data
+            if "data" not in daily_data or "account" not in daily_data["data"]:
+                _LOGGER.error("Unexpected API response structure")
                 return {}
             
-            if data["data"]["account"] is None:
-                _LOGGER.error("Account is None in response. Full response: %s", json.dumps(data, indent=2))
+            if daily_data["data"]["account"] is None:
+                _LOGGER.error("Account is None in response")
                 return {}
             
-            properties = data["data"]["account"].get("properties", [])
+            properties = daily_data["data"]["account"].get("properties", [])
             if not properties:
-                _LOGGER.warning("No properties in response. Full response: %s", json.dumps(data, indent=2))
+                _LOGGER.warning("No properties in response")
                 return {}
             
             measurements = properties[0].get("measurements", {}).get("edges", [])
-            _LOGGER.info("Found %d measurements", len(measurements))
+            _LOGGER.info("Found %d hourly measurements", len(measurements))
             
             if not measurements:
                 _LOGGER.warning("No measurements found")
@@ -282,7 +310,6 @@ class SevernTrentAPI:
             daily_totals = {}
             for measurement in measurements:
                 node = measurement["node"]
-                # Handle scientific notation (e.g., "0E-18" means 0)
                 try:
                     value = float(node["value"])
                 except (ValueError, TypeError):
@@ -291,7 +318,6 @@ class SevernTrentAPI:
                 start_at = node.get("startAt")
                 
                 if start_at:
-                    # Extract just the date part (YYYY-MM-DD)
                     date_str = start_at.split("T")[0]
                     if date_str not in daily_totals:
                         daily_totals[date_str] = 0
@@ -327,6 +353,28 @@ class SevernTrentAPI:
             num_days = len(all_readings)
             avg_daily_usage = total_usage / num_days if num_days > 0 else 0
             
+            # Process monthly data
+            monthly_readings = []
+            for measurement in monthly_measurements:
+                node = measurement["node"]
+                try:
+                    value = float(node["value"])
+                except (ValueError, TypeError):
+                    value = 0.0
+                
+                start_at = node.get("startAt")
+                
+                if start_at:
+                    # Extract year-month
+                    date_str = start_at.split("T")[0]
+                    monthly_readings.append({
+                        "value": round(value, 3),
+                        "start_date": date_str,
+                        "unit": "m³"
+                    })
+            
+            _LOGGER.info("Found %d monthly readings", len(monthly_readings))
+            
             return {
                 "meter_id": f"{self.market_supply_point_id}_{self.device_id}",
                 "yesterday_usage": round(yesterday_total, 3),
@@ -334,7 +382,8 @@ class SevernTrentAPI:
                 "daily_average": round(avg_daily_usage, 3),
                 "total_7day_usage": round(total_usage, 3),
                 "unit": "m³",
-                "all_readings": all_readings
+                "all_readings": all_readings,
+                "monthly_readings": monthly_readings
             }
             
         except requests.exceptions.HTTPError as e:
