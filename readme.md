@@ -14,7 +14,7 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 
 ## Requirements
 
-- Home Assistant 2023.1 or newer
+- Home Assistant 2025.7 or newer
 - A Severn Trent online account with smart meter
 - Your account email and password
 
