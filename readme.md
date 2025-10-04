@@ -14,11 +14,28 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 
 ## Requirements
 
-- Home Assistant 2025.7 or newer
+- Home Assistant 2025.1 or newer
 - A Severn Trent online account with smart meter
 - Your account email and password
 
 ## Installation
+
+### HACS Installation (Recommended)
+
+1. Ensure you have [HACS](https://hacs.xyz/) installed in Home Assistant
+2. Open HACS in Home Assistant (sidebar)
+3. Click the three dots menu in the top right corner
+4. Select **"Custom repositories"**
+5. Add the repository:
+   - **Repository URL**: `https://github.com/xpenno255/ha_severn_trent`
+   - **Category**: Integration
+6. Click **"Add"**
+7. Close the custom repositories dialog
+8. Find "Severn Trent Water" in the HACS integration list
+9. Click **"Download"**
+10. Restart Home Assistant
+11. Go to Settings → Devices & Services → **Add Integration**
+12. Search for "Severn Trent Water" and follow the setup wizard
 
 ### Manual Installation
 
