@@ -1,7 +1,7 @@
 {
   "domain": "severn_trent",
   "name": "Severn Trent Water",
-  "codeowners": "xpenno255",
+  "codeowners": ["@xpenno255"]
   "config_flow": true,
   "documentation": "https://github.com/xpenno255/severn_trent",
   "integration_type": "hub",
