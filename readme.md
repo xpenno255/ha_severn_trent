@@ -15,7 +15,7 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 
 ## Requirements
 
-- Home Assistant 2023.1 or newer
+- Home Assistant 2025.1 or newer
 - A Severn Trent online account with smart meter
 - Your account email and password
 
@@ -28,7 +28,7 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 3. Click the three dots menu in the top right corner
 4. Select **"Custom repositories"**
 5. Add the repository:
-   - **Repository URL**: `https://github.com/yourusername/severn-trent-homeassistant`
+   - **Repository URL**: `https://github.com/xpenno255/ha_severn_trent`
    - **Category**: Integration
 6. Click **"Add"**
 7. Close the custom repositories dialog
