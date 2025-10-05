@@ -262,16 +262,41 @@ class SevernTrentEstimatedMeterReadingSensor(CoordinatorEntity, SensorEntity):
         if not latest_official or not official_date:
             return None
         
+        # Log for debugging
+        import logging
+        _LOGGER = logging.getLogger(__name__)
+        _LOGGER.debug("Calculating estimated reading:")
+        _LOGGER.debug("  Official reading: %s on %s", latest_official, official_date)
+        _LOGGER.debug("  Monthly readings available: %d", len(monthly_readings))
+        
         # Sum all monthly usage since the official reading date
         # Monthly data includes partial data for incomplete months
         usage_since_official = 0
         
         for reading in monthly_readings:
             reading_date = reading.get("start_date")
-            if reading_date and reading_date > official_date:
-                usage_since_official += reading.get("value", 0)
+            reading_value = reading.get("value", 0)
+            _LOGGER.debug("  Monthly reading: %s = %s m³", reading_date, reading_value)
+            
+            # Compare just the date part (YYYY-MM-DD)
+            # Extract date from potentially longer datetime string
+            if reading_date:
+                reading_date_only = reading_date.split("T")[0] if "T" in reading_date else reading_date
+                official_date_only = official_date.split("T")[0] if "T" in official_date else official_date
+                
+                _LOGGER.debug("    Comparing: %s >= %s", reading_date_only, official_date_only)
+                
+                # Reading must be on or after official reading date
+                if reading_date_only >= official_date_only:
+                    _LOGGER.debug("    -> Including this reading")
+                    usage_since_official += reading_value
+                else:
+                    _LOGGER.debug("    -> Skipping (before official date)")
         
         estimated_current = latest_official + usage_since_official
+        _LOGGER.debug("  Total usage since official: %s m³", usage_since_official)
+        _LOGGER.debug("  Estimated current: %s m³", estimated_current)
+        
         return round(estimated_current, 3)
 
     @property
@@ -295,11 +320,15 @@ class SevernTrentEstimatedMeterReadingSensor(CoordinatorEntity, SensorEntity):
         days_since_official = None
         
         if official_date:
-            # Add all monthly usage since official reading
+            official_date_only = official_date.split("T")[0] if "T" in official_date else official_date
+            
+            # Add all monthly usage since official reading (on or after the date)
             for reading in monthly_readings:
                 reading_date = reading.get("start_date")
-                if reading_date and reading_date > official_date:
-                    usage_since_official += reading.get("value", 0)
+                if reading_date:
+                    reading_date_only = reading_date.split("T")[0] if "T" in reading_date else reading_date
+                    if reading_date_only >= official_date_only:
+                        usage_since_official += reading.get("value", 0)
             
             # Calculate days since official reading
             from datetime import datetime
@@ -312,6 +341,6 @@ class SevernTrentEstimatedMeterReadingSensor(CoordinatorEntity, SensorEntity):
             "last_official_date": official_date,
             "usage_since_official": round(usage_since_official, 3) if usage_since_official else None,
             "days_since_official": days_since_official,
-            "monthly_periods_included": len([r for r in monthly_readings if r.get("start_date", "") > (official_date or "")]),
+            "monthly_periods_included": len([r for r in monthly_readings if (r.get("start_date", "").split("T")[0] if "T" in r.get("start_date", "") else r.get("start_date", "")) >= (official_date.split("T")[0] if "T" in official_date else official_date)]),
             "estimation_note": "Official reading + monthly usage totals (includes partial current month)"
         }
