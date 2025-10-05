@@ -1,11 +1,11 @@
 {
   "domain": "severn_trent",
   "name": "Severn Trent Water",
-  "codeowners": ["@xpenno255"]
+  "codeowners": ["@xpenno255"],
   "config_flow": true,
   "documentation": "https://github.com/xpenno255/severn_trent",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "requirements": [],
-  "version": "1.2.1"
+  "version": "1.2.3"
 }
