@@ -1,6 +1,9 @@
 {
-  "name": "Severn Trent",
-  "content_in_root": true,
+  "name": "Severn Trent Water",
+  "content_in_root": false,
+  "filename": "severn_trent",
   "render_readme": true,
-  "hide_default_branch": false
+  "domains": ["sensor"],
+  "iot_class": "cloud_polling",
+  "homeassistant": "2025.1.0"
 }
