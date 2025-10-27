@@ -45,7 +45,9 @@ async def async_setup_entry(
 class SevernTrentYesterdayUsageSensor(CoordinatorEntity, SensorEntity):
     """Sensor for yesterday's water usage."""
 
-    _attr_state_class = SensorStateClass.TOTAL
+    # FIXED: Changed from TOTAL to MEASUREMENT
+    # Yesterday's usage is a fixed historical value, not cumulative
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:water"
 
     def __init__(
@@ -133,7 +135,9 @@ class SevernTrentAverageDailyUsageSensor(CoordinatorEntity, SensorEntity):
 class SevernTrentWeeklyTotalSensor(CoordinatorEntity, SensorEntity):
     """Sensor for total water usage over the last 7 days."""
 
-    _attr_state_class = SensorStateClass.TOTAL
+    # FIXED: Changed from TOTAL to MEASUREMENT
+    # Weekly total is a rolling window calculation, not cumulative
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:water-outline"
 
     def __init__(
@@ -251,50 +255,86 @@ class SevernTrentEstimatedMeterReadingSensor(CoordinatorEntity, SensorEntity):
         manual_data = self.coordinator.data.get("manual_meter", {})
         smart_data = self.coordinator.data.get("smart_meter", {})
         
-        # Need both manual reading and monthly usage data
+        # Need both manual reading and usage data
         if not manual_data or not smart_data:
             return None
         
         latest_official = manual_data.get("latest_reading")
-        official_date = manual_data.get("reading_date")
-        monthly_readings = smart_data.get("monthly_readings", [])
+        official_date_str = manual_data.get("reading_date")
         
-        if not latest_official or not official_date:
+        if not latest_official or not official_date_str:
             return None
         
-        # Log for debugging
-        import logging
-        _LOGGER = logging.getLogger(__name__)
+        # Parse the official reading date
+        try:
+            official_date_str_clean = official_date_str.split("T")[0] if "T" in official_date_str else official_date_str
+            official_date = datetime.fromisoformat(official_date_str_clean).date()
+        except (ValueError, AttributeError) as e:
+            _LOGGER.error("Could not parse official reading date '%s': %s", official_date_str, e)
+            return None
+        
         _LOGGER.debug("Calculating estimated reading:")
         _LOGGER.debug("  Official reading: %s on %s", latest_official, official_date)
-        _LOGGER.debug("  Monthly readings available: %d", len(monthly_readings))
         
-        # Sum all monthly usage since the official reading date
-        # Monthly data includes partial data for incomplete months
-        usage_since_official = 0
+        # IMPROVED CALCULATION:
+        # Use daily readings (all_readings) for more accurate estimation
+        all_readings = smart_data.get("all_readings", [])
         
-        for reading in monthly_readings:
-            reading_date = reading.get("start_date")
-            reading_value = reading.get("value", 0)
-            _LOGGER.debug("  Monthly reading: %s = %s m³", reading_date, reading_value)
+        if all_readings:
+            # Use daily readings for precise calculation
+            usage_since_official = 0
+            days_counted = 0
             
-            # Compare just the date part (YYYY-MM-DD)
-            # Extract date from potentially longer datetime string
-            if reading_date:
-                reading_date_only = reading_date.split("T")[0] if "T" in reading_date else reading_date
-                official_date_only = official_date.split("T")[0] if "T" in official_date else official_date
+            for reading in all_readings:
+                reading_date_str = reading.get("date")
+                reading_value = reading.get("usage", 0)
                 
-                _LOGGER.debug("    Comparing: %s >= %s", reading_date_only, official_date_only)
+                if reading_date_str:
+                    try:
+                        reading_date_str_clean = reading_date_str.split("T")[0] if "T" in reading_date_str else reading_date_str
+                        reading_date = datetime.fromisoformat(reading_date_str_clean).date()
+                        
+                        # Only include readings AFTER the official reading date
+                        if reading_date > official_date:
+                            usage_since_official += reading_value
+                            days_counted += 1
+                            _LOGGER.debug("  Daily reading: %s = %s m³ (included)", reading_date, reading_value)
+                        else:
+                            _LOGGER.debug("  Daily reading: %s = %s m³ (skipped - on or before official date)", reading_date, reading_value)
+                    except (ValueError, AttributeError) as e:
+                        _LOGGER.warning("Could not parse reading date '%s': %s", reading_date_str, e)
+                        continue
+            
+            _LOGGER.debug("  Total usage since official (from %d daily readings): %s m³", days_counted, usage_since_official)
+        else:
+            # Fallback: use monthly readings if daily readings not available
+            monthly_readings = smart_data.get("monthly_readings", [])
+            usage_since_official = 0
+            
+            _LOGGER.debug("  No daily readings available, using monthly readings")
+            
+            for reading in monthly_readings:
+                reading_date_str = reading.get("start_date")
+                reading_value = reading.get("value", 0)
                 
-                # Reading must be on or after official reading date
-                if reading_date_only >= official_date_only:
-                    _LOGGER.debug("    -> Including this reading")
-                    usage_since_official += reading_value
-                else:
-                    _LOGGER.debug("    -> Skipping (before official date)")
+                if reading_date_str:
+                    try:
+                        reading_date_str_clean = reading_date_str.split("T")[0] if "T" in reading_date_str else reading_date_str
+                        reading_date = datetime.fromisoformat(reading_date_str_clean).date()
+                        
+                        # Only include complete months that start AFTER the official reading
+                        if reading_date > official_date:
+                            usage_since_official += reading_value
+                            _LOGGER.debug("  Monthly reading: %s = %s m³ (included)", reading_date, reading_value)
+                        else:
+                            _LOGGER.debug("  Monthly reading: %s = %s m³ (skipped)", reading_date, reading_value)
+                    except (ValueError, AttributeError) as e:
+                        _LOGGER.warning("Could not parse reading date '%s': %s", reading_date_str, e)
+                        continue
+            
+            _LOGGER.debug("  Total usage since official (from monthly readings): %s m³", usage_since_official)
         
         estimated_current = latest_official + usage_since_official
-        _LOGGER.debug("  Total usage since official: %s m³", usage_since_official)
         _LOGGER.debug("  Estimated current: %s m³", estimated_current)
         
         return round(estimated_current, 3)
@@ -312,35 +352,64 @@ class SevernTrentEstimatedMeterReadingSensor(CoordinatorEntity, SensorEntity):
             return {}
         
         latest_official = manual_data.get("latest_reading")
-        official_date = manual_data.get("reading_date")
-        monthly_readings = smart_data.get("monthly_readings", [])
+        official_date_str = manual_data.get("reading_date")
         
         # Calculate usage since official reading
         usage_since_official = 0
         days_since_official = None
+        days_counted = 0
         
-        if official_date:
-            official_date_only = official_date.split("T")[0] if "T" in official_date else official_date
-            
-            # Add all monthly usage since official reading (on or after the date)
-            for reading in monthly_readings:
-                reading_date = reading.get("start_date")
-                if reading_date:
-                    reading_date_only = reading_date.split("T")[0] if "T" in reading_date else reading_date
-                    if reading_date_only >= official_date_only:
-                        usage_since_official += reading.get("value", 0)
-            
-            # Calculate days since official reading
-            from datetime import datetime
-            official_dt = datetime.fromisoformat(official_date)
-            today = datetime.now()
-            days_since_official = (today - official_dt).days
+        if official_date_str:
+            try:
+                official_date_str_clean = official_date_str.split("T")[0] if "T" in official_date_str else official_date_str
+                official_date = datetime.fromisoformat(official_date_str_clean).date()
+                
+                # Try to use daily readings first
+                all_readings = smart_data.get("all_readings", [])
+                
+                if all_readings:
+                    for reading in all_readings:
+                        reading_date_str = reading.get("date")
+                        if reading_date_str:
+                            try:
+                                reading_date_str_clean = reading_date_str.split("T")[0] if "T" in reading_date_str else reading_date_str
+                                reading_date = datetime.fromisoformat(reading_date_str_clean).date()
+                                if reading_date > official_date:
+                                    usage_since_official += reading.get("usage", 0)
+                                    days_counted += 1
+                            except (ValueError, AttributeError):
+                                continue
+                else:
+                    # Fallback to monthly readings
+                    monthly_readings = smart_data.get("monthly_readings", [])
+                    for reading in monthly_readings:
+                        reading_date_str = reading.get("start_date")
+                        if reading_date_str:
+                            try:
+                                reading_date_str_clean = reading_date_str.split("T")[0] if "T" in reading_date_str else reading_date_str
+                                reading_date = datetime.fromisoformat(reading_date_str_clean).date()
+                                if reading_date > official_date:
+                                    usage_since_official += reading.get("value", 0)
+                            except (ValueError, AttributeError):
+                                continue
+                
+                # Calculate days since official reading
+                today = datetime.now().date()
+                days_since_official = (today - official_date).days
+            except (ValueError, AttributeError) as e:
+                _LOGGER.error("Error calculating attributes: %s", e)
         
-        return {
+        attrs = {
             "last_official_reading": latest_official,
-            "last_official_date": official_date,
+            "last_official_date": official_date_str,
             "usage_since_official": round(usage_since_official, 3) if usage_since_official else None,
             "days_since_official": days_since_official,
-            "monthly_periods_included": len([r for r in monthly_readings if (r.get("start_date", "").split("T")[0] if "T" in r.get("start_date", "") else r.get("start_date", "")) >= (official_date.split("T")[0] if "T" in official_date else official_date)]),
-            "estimation_note": "Official reading + monthly usage totals (includes partial current month)"
         }
+        
+        if days_counted > 0:
+            attrs["daily_readings_used"] = days_counted
+            attrs["estimation_note"] = "Official reading + daily usage totals (only days after official reading)"
+        else:
+            attrs["estimation_note"] = "Official reading + monthly usage totals (only complete months after official reading)"
+        
+        return attrs
