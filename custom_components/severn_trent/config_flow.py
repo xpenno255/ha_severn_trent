@@ -16,6 +16,7 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 CONF_ACCOUNT_NUMBER = "account_number"
+CONF_BACKFILL = "backfill_on_setup"
 
 class SevernTrentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Severn Trent Water."""
@@ -26,6 +27,7 @@ class SevernTrentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self.api = None
         self.account_numbers = []
+        self.user_input_data = {}
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -46,6 +48,9 @@ class SevernTrentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if not auth_success:
                     errors["base"] = "invalid_auth"
                 else:
+                    # Store user input for later
+                    self.user_input_data = user_input
+                    
                     # Fetch account numbers
                     self.account_numbers = await self.hass.async_add_executor_job(
                         self.api.fetch_account_numbers
@@ -54,7 +59,7 @@ class SevernTrentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     if not self.account_numbers:
                         errors["base"] = "no_accounts"
                     elif len(self.account_numbers) == 1:
-                        # Single account - proceed directly to setup
+                        # Single account - proceed to backfill selection
                         account_number = self.account_numbers[0]
                         self.api.account_number = account_number
                         
@@ -66,23 +71,12 @@ class SevernTrentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         if not identifiers_success:
                             errors["base"] = "cannot_fetch_meters"
                         else:
-                            # Create entry
-                            await self.async_set_unique_id(user_input[CONF_EMAIL])
-                            self._abort_if_unique_id_configured()
-                            
-                            return self.async_create_entry(
-                                title=f"Severn Trent ({account_number})",
-                                data={
-                                    CONF_EMAIL: user_input[CONF_EMAIL],
-                                    CONF_PASSWORD: user_input[CONF_PASSWORD],
-                                    CONF_ACCOUNT_NUMBER: account_number,
-                                    "market_supply_point_id": self.api.market_supply_point_id,
-                                    "device_id": self.api.device_id,
-                                },
-                            )
+                            # Store account info and proceed to backfill step
+                            self.user_input_data[CONF_ACCOUNT_NUMBER] = account_number
+                            return await self.async_step_backfill()
                     else:
                         # Multiple accounts - show selection step
-                        return await self.async_step_account_selection(user_input)
+                        return await self.async_step_account_selection()
                         
             except Exception:
                 _LOGGER.exception("Unexpected exception")
@@ -118,20 +112,9 @@ class SevernTrentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if not identifiers_success:
                     errors["base"] = "cannot_fetch_meters"
                 else:
-                    # Create entry
-                    await self.async_set_unique_id(self.api.email)
-                    self._abort_if_unique_id_configured()
-                    
-                    return self.async_create_entry(
-                        title=f"Severn Trent ({account_number})",
-                        data={
-                            CONF_EMAIL: self.api.email,
-                            CONF_PASSWORD: self.api.password,
-                            CONF_ACCOUNT_NUMBER: account_number,
-                            "market_supply_point_id": self.api.market_supply_point_id,
-                            "device_id": self.api.device_id,
-                        },
-                    )
+                    # Store account info and proceed to backfill step
+                    self.user_input_data[CONF_ACCOUNT_NUMBER] = account_number
+                    return await self.async_step_backfill()
                     
             except Exception:
                 _LOGGER.exception("Unexpected exception")
@@ -147,5 +130,41 @@ class SevernTrentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders={
                 "num_accounts": str(len(self.account_numbers))
+            }
+        )
+    
+    async def async_step_backfill(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Ask user if they want to backfill historical data."""
+        if user_input is not None:
+            # Create the config entry
+            account_number = self.user_input_data[CONF_ACCOUNT_NUMBER]
+            
+            await self.async_set_unique_id(self.user_input_data[CONF_EMAIL])
+            self._abort_if_unique_id_configured()
+            
+            # Create entry with backfill option
+            return self.async_create_entry(
+                title=f"Severn Trent ({account_number})",
+                data={
+                    CONF_EMAIL: self.user_input_data[CONF_EMAIL],
+                    CONF_PASSWORD: self.user_input_data[CONF_PASSWORD],
+                    CONF_ACCOUNT_NUMBER: account_number,
+                    "market_supply_point_id": self.api.market_supply_point_id,
+                    "device_id": self.api.device_id,
+                    CONF_BACKFILL: user_input.get(CONF_BACKFILL, True),
+                },
+            )
+        
+        return self.async_show_form(
+            step_id="backfill",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_BACKFILL, default=True): bool,
+                }
+            ),
+            description_placeholders={
+                "info": "Backfilling will fetch the last 7 days of hourly data, 60 days of daily data, and all available monthly data."
             }
         )

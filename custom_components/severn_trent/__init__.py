@@ -2,15 +2,14 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.core import HomeAssistant, ServiceCall
 
 from .const import DOMAIN
 from .api import SevernTrentAPI
+from .coordinator import SevernTrentDataCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,42 +37,64 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     _LOGGER.info("Authentication successful during setup")
     
-    async def async_update_data():
-        """Fetch data from API."""
-        try:
-            # Fetch both smart meter and manual readings
-            smart_data = await hass.async_add_executor_job(api.get_meter_readings)
-            manual_data = await hass.async_add_executor_job(api.get_manual_meter_readings)
-            
-            if not smart_data and not manual_data:
-                _LOGGER.warning("No data returned from API")
-            
-            # Combine both datasets
-            return {
-                "smart_meter": smart_data,
-                "manual_meter": manual_data
-            }
-        except Exception as err:
-            _LOGGER.error("Error in update: %s", err, exc_info=True)
-            raise UpdateFailed(f"Error communicating with API: {err}")
-    
-    coordinator = DataUpdateCoordinator(
-        hass,
-        _LOGGER,
-        name="severn_trent",
-        update_method=async_update_data,
-        update_interval=timedelta(hours=1),  # Update every hour for testing
+    # Create coordinator
+    coordinator = SevernTrentDataCoordinator(
+        hass=hass,
+        api=api,
+        account_number=entry.data["account_number"]
     )
     
+    # Perform first refresh
     await coordinator.async_config_entry_first_refresh()
     
+    # Store coordinator
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
         "coordinator": coordinator,
         "api": api,
     }
     
+    # Backfill historical data if requested
+    if entry.data.get("backfill_on_setup", False):
+        _LOGGER.info("Backfill requested, starting historical data import")
+        await coordinator.backfill_historical_data()
+    
+    # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    
+    # Register services
+    async def handle_backfill(call: ServiceCall) -> None:
+        """Handle the backfill service call."""
+        _LOGGER.info("Backfill service called")
+        
+        # Find the coordinator for this account
+        account_number = call.data.get("account_number")
+        
+        if account_number:
+            # Find entry with matching account number
+            for entry_id, data in hass.data[DOMAIN].items():
+                if isinstance(data, dict) and data.get("coordinator"):
+                    coord = data["coordinator"]
+                    if coord.account_number == account_number:
+                        await coord.backfill_historical_data()
+                        _LOGGER.info("Backfill completed for account %s", account_number)
+                        return
+            
+            _LOGGER.error("Could not find account %s", account_number)
+        else:
+            # Backfill all accounts
+            for entry_id, data in hass.data[DOMAIN].items():
+                if isinstance(data, dict) and data.get("coordinator"):
+                    coord = data["coordinator"]
+                    await coord.backfill_historical_data()
+                    _LOGGER.info("Backfill completed for account %s", coord.account_number)
+    
+    # Register the backfill service
+    hass.services.async_register(
+        DOMAIN,
+        "backfill_history",
+        handle_backfill,
+    )
     
     return True
 

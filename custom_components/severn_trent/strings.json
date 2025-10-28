@@ -15,6 +15,13 @@
         "data": {
           "account_number": "Account Number"
         }
+      },
+      "backfill": {
+        "title": "Historical Data Import",
+        "description": "Would you like to import historical water usage data? {info}",
+        "data": {
+          "backfill_on_setup": "Backfill historical data"
+        }
       }
     },
     "error": {

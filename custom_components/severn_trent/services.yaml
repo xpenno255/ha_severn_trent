@@ -1,0 +1,11 @@
+backfill_history:
+  name: Backfill Historical Data
+  description: Backfill historical water usage data from the Severn Trent API.
+  fields:
+    account_number:
+      name: Account Number
+      description: Specific account number to backfill (optional, if not provided will backfill all accounts)
+      example: "123456789"
+      required: false
+      selector:
+        text:

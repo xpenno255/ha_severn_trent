@@ -1,188 +1,491 @@
-# Severn Trent Water - Home Assistant Integration
+# Severn Trent Water Integration - Version 2.0
 
-A custom Home Assistant integration for monitoring water usage from Severn Trent smart meters via the Kraken API.
+## Complete Redesign with Statistics and Enhanced Features
 
-## Features
+This is a major update to the Severn Trent Water Home Assistant integration with a completely redesigned architecture focused on proper data storage, accurate statistics, and enhanced leak detection.
 
-- **Fully Automatic Setup**: Just enter your email and password - account and meter details are discovered automatically
-- **Yesterday's Usage**: Track your water consumption from the previous day
-- **7-Day Average**: Monitor your average daily water usage over the past week
-- **Weekly Total**: See your total water consumption for the last 7 days
-- **Meter Reading**: Official cumulative meter readings with historical data and usage between readings
-- **Estimated Current Meter Reading**: Accurate estimate of your current meter position based on official reading + monthly usage
-- **Automatic Updates**: Data refreshes every hour
-- **Native Home Assistant Integration**: Full support for Home Assistant's sensor platform with proper units and device classes
+---
 
-## Requirements
+## What's New in Version 2.0
 
-- Home Assistant 2025.1 or newer
-- A Severn Trent online account with smart meter
-- Your account email and password
+### ✨ Key Features
 
-## Installation
+1. **Direct Statistics Injection**
+   - Hourly usage data injected directly into Home Assistant's statistics database
+   - Daily usage totals stored as statistics
+   - Weekly totals (Monday-Sunday) stored as statistics
+   - Monthly totals stored as statistics
+   - All data appears natively in HA's history graphs and energy dashboard
 
-### HACS Installation (Recommended)
+2. **Scheduled Updates at 6am Daily**
+   - Fetches complete previous day's data when it's fully available
+   - Avoids partial/incomplete readings during the day
+   - Retry logic with hourly attempts if updates fail
 
-1. Ensure you have [HACS](https://hacs.xyz/) installed in Home Assistant
-2. Open HACS in Home Assistant (sidebar)
-3. Click the three dots menu in the top right corner
-4. Select **"Custom repositories"**
-5. Add the repository:
-   - **Repository URL**: `https://github.com/xpenno255/ha_severn_trent`
-   - **Category**: Integration
-6. Click **"Add"**
-7. Close the custom repositories dialog
-8. Find "Severn Trent Water" in the HACS integration list
-9. Click **"Download"**
-10. Restart Home Assistant
-11. Go to Settings → Devices & Services → **Add Integration**
-12. Search for "Severn Trent Water" and follow the setup wizard
+3. **Historical Data Backfill**
+   - Optional backfill on initial setup
+   - Manual backfill service available
+   - Imports last 7 days of hourly data, 60 days of daily data, and all available monthly data
 
-### Manual Installation
+4. **New Sensors**
+   - **Previous Day Usage** - Total water usage for yesterday
+   - **Week to Date** - Cumulative usage for current week (Monday-Sunday, resets weekly)
+   - **Month to Date** - Cumulative usage for current month
+   - **Overnight Usage** - Usage between 2am-5am (leak detection indicator)
+   - **Overnight Leak Alert** - Binary sensor that alerts if >0.01m³ used overnight
+   - **Meter Reading** - Official meter reading from Severn Trent
+   - **Estimated Meter Reading** - Current estimated reading based on official reading + daily usage
 
-1. Copy the `severn_trent` folder to your Home Assistant `custom_components` directory:
-   ```
-   config/
-   └── custom_components/
-       └── severn_trent/
-           ├── __init__.py
-           ├── api.py
-           ├── config_flow.py
-           ├── const.py
-           ├── manifest.json
-           ├── sensor.py
-           └── strings.json
-   ```
+5. **Fixed State Classes**
+   - Corrected state class usage to prevent incorrect statistics accumulation
+   - Previous day and weekly sensors now use MEASUREMENT instead of TOTAL
 
-2. Restart Home Assistant
+---
 
-3. Go to Settings → Devices & Services → Add Integration
+## Architecture Overview
 
-4. Search for "Severn Trent Water"
+### Data Flow
 
-## Configuration
+```
+6am Daily Update:
+1. API Fetch → Hourly data for yesterday
+2. API Fetch → Daily data for last 14 days  
+3. API Fetch → Monthly data (full year including partial current month)
+4. API Fetch → Manual meter readings
 
-Setup is fully automatic! You only need:
+↓
 
-1. **Email**: Your Severn Trent account email
-2. **Password**: Your Severn Trent account password
+5. Inject to Statistics Database:
+   - Hourly statistics (each hour as separate entry)
+   - Daily statistics (one per day)
+   - Weekly statistics (Monday-Sunday totals, stored on Sunday)
+   - Monthly statistics (stored on last day of month)
 
-The integration will automatically:
-- Discover your account number(s)
-- Fetch your meter identifiers (Device ID and Market Supply Point ID)
-- Set up all sensors with historical data
+↓
 
-### Multiple Accounts
+6. Calculate Sensor Values:
+   - Previous Day Usage (from daily data)
+   - Week to Date (sum Monday-Sunday for current week)
+   - Month to Date (from monthly API data)
+   - Overnight Usage (2am-5am from statistics)
+   - Overnight Leak Alert (overnight > 0.01m³)
+```
 
-If you have multiple Severn Trent accounts, you'll be prompted to select which one to monitor after entering your credentials.
+### Files Modified
 
-### Setup Process
+1. **`api.py`** - New methods for fetching hourly, daily, and monthly data
+2. **`coordinator.py`** (NEW) - Handles scheduled updates and statistics injection
+3. **`sensor.py`** - Completely rewritten with new sensor classes
+4. **`config_flow.py`** - Added backfill checkbox
+5. **`__init__.py`** - Updated to use new coordinator and register services
+6. **`services.yaml`** (NEW) - Defines backfill service
+7. **`strings.json`** - Added backfill step text
 
-1. Add the integration through the Home Assistant UI
-2. Enter your email and password
-3. If you have multiple accounts, select the one to monitor
-4. Click Submit
+---
 
-The integration will authenticate and begin fetching your water usage data immediately.
+## Sensors Explained
 
-## Sensors
+### Previous Day Usage
+- **Updates**: 6am daily
+- **Value**: Total water usage for the previous complete day
+- **State Class**: MEASUREMENT
+- **Use Case**: See exactly how much water was used yesterday
 
-The integration creates five sensors:
+### Week to Date
+- **Updates**: 6am daily
+- **Value**: Cumulative usage from Monday to yesterday
+- **Resets**: Every Monday
+- **State Class**: MEASUREMENT
+- **Use Case**: Track weekly usage patterns, resets each week for easy comparison
 
-| Sensor | Description | Unit |
-|--------|-------------|------|
-| `sensor.severn_trent_yesterday_usage` | Water consumed yesterday | m³ |
-| `sensor.severn_trent_daily_average` | Average daily usage over 7 days | m³/d |
-| `sensor.severn_trent_weekly_total` | Total usage over 7 days | m³ |
-| `sensor.severn_trent_meter_reading` | Official cumulative meter reading | m³ |
-| `sensor.severn_trent_estimated_meter_reading` | Estimated current meter reading | m³ |
+### Month to Date
+- **Updates**: 6am daily
+- **Value**: Cumulative usage for the current month (from API monthly data)
+- **Resets**: First day of each month
+- **State Class**: MEASUREMENT
+- **Use Case**: Monitor monthly consumption against budget/targets
 
-### Sensor Attributes
+### Overnight Usage
+- **Updates**: 6am daily
+- **Value**: Total water usage between 2am-5am (previous night)
+- **Calculation**: Queries hourly statistics for 2am-5am window
+- **State Class**: MEASUREMENT
+- **Use Case**: Identify baseline consumption and potential leaks
 
-Each sensor includes additional attributes:
+### Overnight Leak Alert
+- **Type**: Binary Sensor
+- **Updates**: 6am daily
+- **Threshold**: 0.01 m³ (10 liters)
+- **State**: ON if overnight usage > threshold, OFF otherwise
+- **Use Case**: Automatic alerts for potential water leaks during low-usage hours
 
-**Yesterday Usage:**
-- Date
-- Meter ID
+### Meter Reading
+- **Updates**: When Severn Trent records a new reading
+- **Value**: Official cumulative meter reading
+- **State Class**: TOTAL_INCREASING
+- **Use Case**: Track official readings from Severn Trent
 
-**Daily Average:**
-- Recent daily readings (last 7 days)
-- Period information
+### Estimated Meter Reading
+- **Updates**: 6am daily
+- **Calculation**: Last official reading + sum of daily usage since that reading
+- **State Class**: TOTAL_INCREASING
+- **Use Case**: Estimate current meter position between official readings
 
-**Weekly Total:**
-- Period
-- Number of days included
+---
 
-**Meter Reading:**
-- Reading date
-- Reading source (METER_READER, OPS, CUSTOMER)
-- Previous reading and date
-- Usage since last reading
-- Days between readings
-- Average daily usage between readings
-- All historical readings
+## Statistics Entities
 
-**Estimated Meter Reading:**
-- Last official reading and date
-- Usage accumulated since official reading
-- Days since official reading
-- Number of monthly periods included
-- Estimation note
+These are not visible as sensors but are queryable in history/energy dashboard:
 
-## How the Estimated Meter Reading Works
+### `severn_trent:{account}:hourly_usage`
+- One entry per hour
+- Shows water usage for each hour of each day
+- Perfect for detailed usage analysis
 
-The estimated meter reading provides an accurate prediction of your current meter position:
+### `severn_trent:{account}:daily_usage`
+- One entry per day
+- Total usage for each complete day
 
-1. Starts with your last official meter reading (taken every ~6 months by Severn Trent)
-2. Adds monthly usage totals from your smart meter since that date
-3. Includes partial data for the current incomplete month
+### `severn_trent:{account}:weekly_usage`
+- One entry per week (stored on Sunday)
+- Total usage for each Monday-Sunday period
+
+### `severn_trent:{account}:monthly_usage`
+- One entry per month
+- Total usage for each calendar month
+
+---
+
+## Installation & Setup
+
+### First Time Setup
+
+1. Install the integration through HACS or manually
+2. Go to Settings → Devices & Services → Add Integration
+3. Search for "Severn Trent Water"
+4. Enter your email and password
+5. Select your account (if you have multiple)
+6. **Choose backfill option** (recommended: YES)
+   - This will import historical data:
+     - Last 7 days of hourly data
+     - Last 60 days of daily data
+     - All available monthly data (from June 2025)
+7. Wait for setup to complete (backfill may take 1-2 minutes)
+
+### Manual Backfill
+
+If you didn't backfill during setup or want to refresh historical data:
+
+**Option 1: Service Call in Developer Tools**
+```yaml
+service: severn_trent.backfill_history
+data:
+  account_number: "YOUR_ACCOUNT_NUMBER"  # Optional, omit to backfill all accounts
+```
+
+**Option 2: Automation**
+```yaml
+automation:
+  - alias: "Backfill Severn Trent Data"
+    trigger:
+      - platform: time
+        at: "03:00:00"
+    action:
+      - service: severn_trent.backfill_history
+```
+
+---
+
+## Update Schedule
+
+### Daily at 6am
+- Fetches previous day's complete data
+- Injects statistics
+- Updates all sensors
+- **Why 6am?** API data is most reliable for complete previous days
+
+### Retry Logic
+- If 6am update fails → retry every hour until successful
+- Tracks missing dates
+- Automatically fetches missed data on next successful connection
+
+---
+
+## Data Quality & Reliability
+
+### API Data Sources
+
+The integration uses different API endpoints optimally:
+
+1. **Hourly Data** - `HOUR_INTERVAL` frequency
+   - Most granular data
+   - Used for overnight leak detection
+   - Fetched for previous day only
+
+2. **Daily Data** - Aggregated from hourly
+   - Used for week-to-date calculations
+   - Fetched for last 14 days (ensures we have full weeks)
+
+3. **Monthly Data** - `MONTH_INTERVAL` frequency  
+   - Includes partial current month
+   - Used for month-to-date sensor
+   - Most efficient for long-term data
+
+### State Class Fixes
+
+Previous version incorrectly used `TOTAL` state class for sensors that should have been `MEASUREMENT`. This caused Home Assistant to calculate deltas incorrectly, resulting in stepped graphs.
+
+**Fixed Sensors:**
+- Yesterday Usage → Previous Day Usage (now MEASUREMENT)
+- Weekly Total → Week to Date (now MEASUREMENT)
+
+**Explanation:**
+- `TOTAL` = cumulative value that only increases (like a meter reading)
+- `MEASUREMENT` = point-in-time value (like daily usage)
+- Using correct state classes ensures proper statistics and graphs
+
+---
+
+## Estimated Meter Reading Calculation
+
+### Old Method (❌ Incorrect)
+```python
+official_reading + sum(monthly_readings >= official_date)
+```
+**Problem:** Used monthly data which could include partial months and double-count usage
+
+### New Method (✅ Correct)
+```python
+official_reading + sum(daily_statistics > official_date)
+```
+**Improvement:** Uses daily statistics for accurate day-by-day tracking
 
 **Example:**
-- Official reading: 272 m³ (October 1st, 2025)
-- September usage: 9.841 m³
-- October usage so far: 0.831 m³
-- Estimated current reading: 272 + 9.841 + 0.831 = 282.672 m³
+- Official reading: 1000.00 m³ on October 1st
+- Daily usage Oct 2-27: 7.5 m³
+- Estimated reading: 1000.00 + 7.5 = 1007.5 m³
 
-This gives you an accurate running total between official 6-monthly readings.
-
-## Data Sources
-
-The integration uses three data sources:
-
-1. **Smart Meter Hourly Data**: Automated readings taken every hour, aggregated into daily totals for the past 7 days
-2. **Smart Meter Monthly Data**: Monthly usage totals for the past 12 months (includes partial current month)
-3. **Manual Meter Readings**: Official readings taken periodically (typically bi-annually) showing cumulative meter totals
+---
 
 ## Troubleshooting
 
-### No Data Showing
+### Sensors showing "Unknown" or "Unavailable"
 
-1. Check the Home Assistant logs (Settings → System → Logs)
-2. Filter for "severn_trent" to see integration-specific messages
-3. Manually trigger an update:
-   ```yaml
-   service: homeassistant.update_entity
-   target:
-     entity_id: sensor.severn_trent_yesterday_usage
-   ```
+**Cause:** Waiting for 6am update or statistics not yet populated
 
-### Authentication Errors
+**Solution:**
+1. Wait until after 6am for first update
+2. Run manual backfill: `severn_trent.backfill_history`
+3. Check logs for errors
 
-If you see "Unauthorized" or authentication errors:
-- Verify your email and password are correct
-- Check that you can log into the Severn Trent website with the same credentials
-- Ensure there are no leading or trailing spaces in your credentials
+### No historical data in graphs
 
-### No Accounts Found
+**Cause:** Backfill wasn't run or statistics injection failed
 
-If the integration reports "No Severn Trent accounts found":
-- Verify you have an active Severn Trent account
-- Check that your account has a smart water meter installed
-- Try logging into the Severn Trent website to confirm your account is active
+**Solution:**
+1. Call backfill service manually
+2. Check Home Assistant logs for errors
+3. Verify recorder is enabled
 
-### Enable Debug Logging
+### Overnight leak sensor always OFF
 
-Add to your `configuration.yaml`:
+**Cause:** No hourly statistics for 2am-5am period yet
+
+**Solution:**
+1. Wait 24 hours after setup for first overnight period
+2. Verify hourly statistics exist: Developer Tools → Statistics
+
+### Week to Date not resetting on Monday
+
+**Cause:** Update hasn't run yet on Monday
+
+**Solution:**
+- Sensor updates at 6am, so will reset Monday at 6am
+- Check coordinator logs at 6am
+
+---
+
+## API Rate Limits & Efficiency
+
+### Update Strategy
+- **Single daily update at 6am**
+- Minimal API calls (3 queries: hourly, daily, monthly)
+- Backfill is one-time or manual only
+
+### API Queries Per Day
+- Normal operation: 3 queries at 6am
+- With retries (if failure): Up to 3 queries per hour until success
+- Backfill (manual): ~3 queries once
+
+---
+
+## Energy Dashboard Integration
+
+All statistics can be used in Home Assistant's Energy Dashboard:
+
+1. Go to Settings → Dashboards → Energy
+2. Add Water source
+3. Select statistic: `severn_trent:{account}:daily_usage`
+4. Configure costs if desired
+
+You can also create custom energy cards using:
+- `severn_trent:{account}:hourly_usage` for detailed view
+- `severn_trent:{account}:weekly_usage` for weekly trends
+- `severn_trent:{account}:monthly_usage` for monthly comparison
+
+---
+
+## Example Automations
+
+### Leak Alert Notification
+```yaml
+automation:
+  - alias: "Water Leak Detected"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.severn_trent_overnight_leak_alert
+        to: "on"
+    action:
+      - service: notify.mobile_app
+        data:
+          title: "Potential Water Leak!"
+          message: >
+            {{ states('sensor.severn_trent_overnight_usage') }}m³ used overnight.
+            This is above the normal threshold.
+```
+
+### Weekly Usage Report
+```yaml
+automation:
+  - alias: "Weekly Water Usage Report"
+    trigger:
+      - platform: time
+        at: "09:00:00"
+    condition:
+      - condition: time
+        weekday:
+          - mon
+    action:
+      - service: notify.mobile_app
+        data:
+          title: "Last Week's Water Usage"
+          message: >
+            You used {{ states('sensor.severn_trent_week_to_date') }}m³ last week.
+```
+
+### High Usage Alert
+```yaml
+automation:
+  - alias: "High Daily Usage Alert"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.severn_trent_previous_day_usage
+        above: 0.5  # 500 liters
+    action:
+      - service: notify.mobile_app
+        data:
+          title: "High Water Usage Yesterday"
+          message: >
+            Yesterday's usage was {{ states('sensor.severn_trent_previous_day_usage') }}m³.
+            This is higher than normal.
+```
+
+---
+
+## Migration from Version 1.x
+
+### What happens to old data?
+
+Old sensors will be removed. Historical data from statistics will remain.
+
+### Steps to migrate:
+
+1. **Backup your Home Assistant** (recommended)
+2. Remove old integration
+3. Install new version
+4. Re-add integration with same credentials
+5. **Enable backfill** to import historical data
+6. Update any automations/dashboards to use new sensor names
+
+### Sensor Name Changes
+
+| Old Sensor | New Sensor |
+|------------|------------|
+| `sensor.severn_trent_yesterday_usage` | `sensor.severn_trent_previous_day_usage` |
+| `sensor.severn_trent_weekly_total` | `sensor.severn_trent_week_to_date` |
+| `sensor.severn_trent_daily_average` | (removed - calculate from statistics) |
+| `sensor.severn_trent_meter_reading` | `sensor.severn_trent_meter_reading` (unchanged) |
+| `sensor.severn_trent_estimated_meter_reading` | `sensor.severn_trent_estimated_meter_reading` (unchanged, but fixed calculation) |
+
+---
+
+## Technical Details
+
+### Statistics Format
+
+#### Hourly Statistics
+```python
+StatisticData(
+    start=datetime(2025, 10, 27, 8, 0, 0),  # 8am
+    state=0.106,  # 106 liters used this hour
+    sum=0.106
+)
+```
+
+#### Daily Statistics
+```python
+StatisticData(
+    start=datetime(2025, 10, 27, 0, 0, 0),  # Midnight
+    state=0.395,  # 395 liters used this day
+    sum=0.395
+)
+```
+
+#### Weekly Statistics
+```python
+StatisticData(
+    start=datetime(2025, 10, 27, 0, 0, 0),  # Sunday (end of week)
+    state=2.156,  # Total for Mon-Sun week
+    sum=2.156
+)
+```
+
+### Coordinator Update Logic
+
+```python
+async def _async_update_data():
+    now = datetime.now()
+    
+    # Only update at 6am or if we have missing data
+    if now.hour != 6 and not self.missing_dates:
+        return self.data  # Skip update
+    
+    # Fetch yesterday's data
+    fetch_date = yesterday if not self.missing_dates else self.missing_dates[0]
+    
+    # Fetch all data types
+    hourly = fetch_hourly_data(fetch_date)
+    daily = fetch_daily_data(last_14_days)
+    monthly = fetch_monthly_data()
+    manual = fetch_manual_readings()
+    
+    # Inject to statistics
+    inject_hourly_statistics(hourly)
+    inject_daily_statistics(daily)
+    inject_weekly_statistics(daily)  # Calculate weeks from daily
+    inject_monthly_statistics(monthly)
+    
+    # Calculate sensor values
+    return calculate_current_values(...)
+```
+
+---
+
+## Support & Feedback
+
+### Logs
+
+Enable debug logging for detailed information:
 
 ```yaml
 logger:
@@ -191,90 +494,51 @@ logger:
     custom_components.severn_trent: debug
 ```
 
-Then restart Home Assistant to see detailed logs.
+### Common Log Messages
 
-## API Information
-
-This integration uses the Kraken API platform (developed by Octopus Energy and used by Severn Trent). The API:
-- Uses GraphQL for data queries
-- Requires JWT authentication
-- Provides hourly, daily, and monthly water usage data from smart meters
-- Provides manual meter readings with historical data
-- Tokens expire after 15 minutes (automatically refreshed)
-
-## Update Frequency
-
-By default, the integration updates every hour. To change this, edit `__init__.py`:
-
-```python
-update_interval=timedelta(hours=1),  # Change to desired interval
+✅ **Success:**
+```
+Successfully updated data for 2025-10-27
+Injected 24 hourly statistics
+Injected 1 daily statistics
 ```
 
-Recommended intervals:
-- Hourly: `timedelta(hours=1)` (default)
-- Every 6 hours: `timedelta(hours=6)`
-- Daily: `timedelta(days=1)`
+⚠️ **Retry:**
+```
+Authentication failed during update
+Fetch status: failed
+Adding 2025-10-27 to missing_dates
+```
 
-Note: Smart meter data has a delay - hourly readings aren't available immediately and yesterday's data is the most recent complete day available.
+❌ **Error:**
+```
+Error fetching HOUR_INTERVAL data: HTTP 401
+Could not calculate overnight usage: No statistics found
+```
 
-## Data Limitations
+---
 
-**Smart Meter Data:**
-- Hourly readings have a processing delay
-- "Yesterday" is the most recent complete day available
-- "Today" data is not available due to API limitations
-- Hourly data is aggregated into daily totals
-- Monthly data includes partial data for incomplete months
+## Future Enhancements
 
-**Manual Meter Readings:**
-- Typically taken bi-annually by meter readers
-- Shows cumulative meter total (like an odometer)
-- Historical readings available for usage tracking over time
+Potential features for future versions:
 
-## Energy Dashboard Integration
+1. **Cost Tracking** - Add water/wastewater rates for cost calculation
+2. **Usage Predictions** - ML-based prediction of daily/weekly usage
+3. **Comparison Features** - Compare to previous week/month/year
+4. **Multiple Meters** - Support for properties with multiple meters
+5. **Tariff Support** - Handle different pricing tiers
+6. **Irrigation Mode** - Separate indoor vs outdoor water tracking
 
-The weekly total sensor can be added to Home Assistant's Energy Dashboard:
-1. Go to Settings → Dashboards → Energy
-2. Add Water Consumption
-3. Select `sensor.severn_trent_weekly_total`
+---
 
-## Contributing
+## Credits
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+- Original integration by @xpenno255
+- Version 2.0 redesign with assistance from Claude (Anthropic)
+- Severn Trent API documentation (unofficial)
+
+---
 
 ## License
 
-This project is licensed under the MIT License.
-
-## Disclaimer
-
-This is an unofficial integration and is not affiliated with or endorsed by Severn Trent. Use at your own risk.
-
-## Acknowledgments
-
-- Built using the Kraken API platform by Octopus Energy
-- Thanks to the Home Assistant community
-- Special thanks to all contributors who helped discover API endpoints and improve the integration
-
-## Support
-
-For issues, questions, or feature requests, please open an issue on GitHub.
-
-## Changelog
-
-### v1.2.0
-- Added estimated current meter reading sensor
-- Fetches monthly usage data (past 12 months) for accurate estimation
-- Improved calculation: official reading + monthly totals (including partial current month)
-
-### v1.1.0
-- Added automatic discovery of account numbers
-- Added automatic discovery of meter identifiers
-- Simplified setup to just email and password
-- Added support for multiple accounts
-- Added manual meter reading sensor with historical data
-
-### v1.0.0
-- Initial release
-- Smart meter daily usage tracking
-- 7-day average and weekly total sensors
+This integration is provided as-is with no warranty. Use at your own risk.

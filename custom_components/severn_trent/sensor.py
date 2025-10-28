@@ -1,7 +1,7 @@
 """Sensor platform for Severn Trent Water integration."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from typing import Any
 
@@ -10,16 +10,21 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
+from homeassistant.components.binary_sensor import (
+    BinarySensorEntity,
+    BinarySensorDeviceClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-    DataUpdateCoordinator,
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.components.recorder.statistics import (
+    statistics_during_period,
 )
 
 from .const import DOMAIN
+from .coordinator import SevernTrentDataCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,148 +38,282 @@ async def async_setup_entry(
     account_number = entry.data["account_number"]
     
     sensors = [
-        SevernTrentYesterdayUsageSensor(coordinator, account_number),
-        SevernTrentAverageDailyUsageSensor(coordinator, account_number),
-        SevernTrentWeeklyTotalSensor(coordinator, account_number),
+        SevernTrentPreviousDayUsageSensor(coordinator, account_number),
+        SevernTrentWeekToDateSensor(coordinator, account_number),
+        SevernTrentMonthToDateSensor(coordinator, account_number),
+        SevernTrentOvernightUsageSensor(coordinator, account_number),
+        SevernTrentOvernightLeakSensor(coordinator, account_number),
         SevernTrentMeterReadingSensor(coordinator, account_number),
         SevernTrentEstimatedMeterReadingSensor(coordinator, account_number),
     ]
     
     async_add_entities(sensors)
 
-class SevernTrentYesterdayUsageSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for yesterday's water usage."""
 
-    # FIXED: Changed from TOTAL to MEASUREMENT
-    # Yesterday's usage is a fixed historical value, not cumulative
+class SevernTrentPreviousDayUsageSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for previous day's total water usage."""
+
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfVolume.CUBIC_METERS
     _attr_icon = "mdi:water"
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator,
+        coordinator: SevernTrentDataCoordinator,
         account_number: str,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._account_number = account_number
-        self._attr_name = "Severn Trent Yesterday Usage"
-        self._attr_unique_id = f"{account_number}_yesterday_usage"
+        self._attr_name = "Severn Trent Previous Day Usage"
+        self._attr_unique_id = f"{account_number}_previous_day_usage"
 
     @property
     def native_value(self) -> float | None:
         """Return the state of the sensor."""
-        if not self.coordinator.data or "smart_meter" not in self.coordinator.data:
+        if not self.coordinator.data or "previous_day" not in self.coordinator.data:
             return None
-        return self.coordinator.data["smart_meter"].get("yesterday_usage")
-
-    @property
-    def native_unit_of_measurement(self) -> str | None:
-        """Return the unit of measurement."""
-        if not self.coordinator.data or "smart_meter" not in self.coordinator.data:
-            return UnitOfVolume.CUBIC_METERS
-        return self.coordinator.data["smart_meter"].get("unit", UnitOfVolume.CUBIC_METERS)
+        return self.coordinator.data["previous_day"].get("usage")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
-        if not self.coordinator.data or "smart_meter" not in self.coordinator.data:
+        if not self.coordinator.data or "previous_day" not in self.coordinator.data:
             return {}
         
         return {
-            "date": self.coordinator.data["smart_meter"].get("yesterday_date"),
-            "meter_id": self.coordinator.data["smart_meter"].get("meter_id"),
+            "date": self.coordinator.data["previous_day"].get("date"),
+            "last_update": self.coordinator.data.get("last_successful_update"),
         }
 
-class SevernTrentAverageDailyUsageSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for average daily water usage over the last 7 days."""
+
+class SevernTrentWeekToDateSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for current week's cumulative usage (Monday-Sunday)."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_icon = "mdi:water-pump"
+    _attr_native_unit_of_measurement = UnitOfVolume.CUBIC_METERS
+    _attr_icon = "mdi:calendar-week"
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator,
+        coordinator: SevernTrentDataCoordinator,
         account_number: str,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._account_number = account_number
-        self._attr_name = "Severn Trent Daily Average"
-        self._attr_unique_id = f"{account_number}_daily_average"
+        self._attr_name = "Severn Trent Week to Date"
+        self._attr_unique_id = f"{account_number}_week_to_date"
 
     @property
     def native_value(self) -> float | None:
         """Return the state of the sensor."""
-        if not self.coordinator.data or "smart_meter" not in self.coordinator.data:
+        if not self.coordinator.data or "week_to_date" not in self.coordinator.data:
             return None
-        return self.coordinator.data["smart_meter"].get("daily_average")
-
-    @property
-    def native_unit_of_measurement(self) -> str | None:
-        """Return the unit of measurement."""
-        if not self.coordinator.data or "smart_meter" not in self.coordinator.data:
-            return UnitOfVolume.CUBIC_METERS
-        unit = self.coordinator.data["smart_meter"].get("unit", UnitOfVolume.CUBIC_METERS)
-        return f"{unit}/d"
+        return self.coordinator.data["week_to_date"].get("usage")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
-        if not self.coordinator.data or "smart_meter" not in self.coordinator.data:
+        if not self.coordinator.data or "week_to_date" not in self.coordinator.data:
             return {}
         
-        # Include recent readings for history
-        all_readings = self.coordinator.data["smart_meter"].get("all_readings", [])
+        week_data = self.coordinator.data["week_to_date"]
+        start_date_str = week_data.get("start_date")
+        
+        # Calculate end date (Sunday)
+        if start_date_str:
+            start_date = datetime.fromisoformat(start_date_str).date()
+            end_date = start_date + timedelta(days=6)
+            end_date_str = end_date.isoformat()
+        else:
+            end_date_str = None
         
         return {
-            "recent_readings": all_readings[:7] if all_readings else [],
-            "period": "7 days",
+            "week_start": start_date_str,
+            "week_end": end_date_str,
+            "days_included": week_data.get("days_included", 0),
         }
 
-class SevernTrentWeeklyTotalSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for total water usage over the last 7 days."""
 
-    # FIXED: Changed from TOTAL to MEASUREMENT
-    # Weekly total is a rolling window calculation, not cumulative
+class SevernTrentMonthToDateSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for current month's cumulative usage."""
+
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_icon = "mdi:water-outline"
+    _attr_native_unit_of_measurement = UnitOfVolume.CUBIC_METERS
+    _attr_icon = "mdi:calendar-month"
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator,
+        coordinator: SevernTrentDataCoordinator,
         account_number: str,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._account_number = account_number
-        self._attr_name = "Severn Trent Weekly Total"
-        self._attr_unique_id = f"{account_number}_weekly_total"
+        self._attr_name = "Severn Trent Month to Date"
+        self._attr_unique_id = f"{account_number}_month_to_date"
 
     @property
     def native_value(self) -> float | None:
         """Return the state of the sensor."""
-        if not self.coordinator.data or "smart_meter" not in self.coordinator.data:
+        if not self.coordinator.data or "month_to_date" not in self.coordinator.data:
             return None
-        return self.coordinator.data["smart_meter"].get("total_7day_usage")
-
-    @property
-    def native_unit_of_measurement(self) -> str | None:
-        """Return the unit of measurement."""
-        if not self.coordinator.data or "smart_meter" not in self.coordinator.data:
-            return UnitOfVolume.CUBIC_METERS
-        return self.coordinator.data["smart_meter"].get("unit", UnitOfVolume.CUBIC_METERS)
+        return self.coordinator.data["month_to_date"].get("usage")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
-        if not self.coordinator.data or "smart_meter" not in self.coordinator.data:
+        if not self.coordinator.data or "month_to_date" not in self.coordinator.data:
             return {}
         
         return {
-            "period": "7 days",
-            "days_included": len(self.coordinator.data["smart_meter"].get("all_readings", [])),
+            "month": self.coordinator.data["month_to_date"].get("month"),
         }
+
+
+class SevernTrentOvernightUsageSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for overnight usage (2am-5am) from previous day."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfVolume.CUBIC_METERS
+    _attr_icon = "mdi:weather-night"
+
+    def __init__(
+        self,
+        coordinator: SevernTrentDataCoordinator,
+        account_number: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._account_number = account_number
+        self._attr_name = "Severn Trent Overnight Usage"
+        self._attr_unique_id = f"{account_number}_overnight_usage"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the state of the sensor."""
+        # Calculate overnight usage from hourly statistics (2am-5am)
+        yesterday = (datetime.now() - timedelta(days=1)).date()
+        
+        # Query hourly statistics for yesterday between 2am-5am
+        statistic_id = f"severn_trent:{self._account_number}:hourly_usage"
+        
+        start_time = datetime.combine(yesterday, datetime.min.time().replace(hour=2))
+        end_time = datetime.combine(yesterday, datetime.min.time().replace(hour=6))
+        
+        try:
+            stats = statistics_during_period(
+                self.hass,
+                start_time,
+                end_time,
+                {statistic_id},
+                "hour",
+                None,
+                {"sum"}
+            )
+            
+            if statistic_id in stats and stats[statistic_id]:
+                # Sum all hourly values between 2am-5am
+                total = sum(stat["sum"] for stat in stats[statistic_id] if stat.get("sum") is not None)
+                return round(total, 3)
+        except Exception as e:
+            _LOGGER.warning("Could not calculate overnight usage: %s", e)
+        
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        yesterday = (datetime.now() - timedelta(days=1)).date()
+        return {
+            "date": yesterday.isoformat(),
+            "time_range": "02:00-05:59",
+        }
+
+
+class SevernTrentOvernightLeakSensor(CoordinatorEntity, BinarySensorEntity):
+    """Binary sensor for detecting potential overnight leaks."""
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_icon = "mdi:pipe-leak"
+
+    def __init__(
+        self,
+        coordinator: SevernTrentDataCoordinator,
+        account_number: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._account_number = account_number
+        self._attr_name = "Severn Trent Overnight Leak Alert"
+        self._attr_unique_id = f"{account_number}_overnight_leak"
+        self._threshold = 0.01  # 0.01 m³ threshold
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return true if leak detected."""
+        # Get overnight usage from the other sensor
+        yesterday = (datetime.now() - timedelta(days=1)).date()
+        statistic_id = f"severn_trent:{self._account_number}:hourly_usage"
+        
+        start_time = datetime.combine(yesterday, datetime.min.time().replace(hour=2))
+        end_time = datetime.combine(yesterday, datetime.min.time().replace(hour=6))
+        
+        try:
+            stats = statistics_during_period(
+                self.hass,
+                start_time,
+                end_time,
+                {statistic_id},
+                "hour",
+                None,
+                {"sum"}
+            )
+            
+            if statistic_id in stats and stats[statistic_id]:
+                total = sum(stat["sum"] for stat in stats[statistic_id] if stat.get("sum") is not None)
+                return total > self._threshold
+        except Exception as e:
+            _LOGGER.warning("Could not check for overnight leak: %s", e)
+        
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        yesterday = (datetime.now() - timedelta(days=1)).date()
+        
+        # Get actual overnight usage
+        statistic_id = f"severn_trent:{self._account_number}:hourly_usage"
+        start_time = datetime.combine(yesterday, datetime.min.time().replace(hour=2))
+        end_time = datetime.combine(yesterday, datetime.min.time().replace(hour=6))
+        
+        overnight_usage = None
+        try:
+            stats = statistics_during_period(
+                self.hass,
+                start_time,
+                end_time,
+                {statistic_id},
+                "hour",
+                None,
+                {"sum"}
+            )
+            
+            if statistic_id in stats and stats[statistic_id]:
+                total = sum(stat["sum"] for stat in stats[statistic_id] if stat.get("sum") is not None)
+                overnight_usage = round(total, 3)
+        except Exception as e:
+            _LOGGER.warning("Could not get overnight usage: %s", e)
+        
+        return {
+            "date": yesterday.isoformat(),
+            "threshold": self._threshold,
+            "overnight_usage": overnight_usage,
+            "time_range": "02:00-05:59",
+        }
+
 
 class SevernTrentMeterReadingSensor(CoordinatorEntity, SensorEntity):
     """Sensor for manual meter reading (cumulative total)."""
@@ -186,7 +325,7 @@ class SevernTrentMeterReadingSensor(CoordinatorEntity, SensorEntity):
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator,
+        coordinator: SevernTrentDataCoordinator,
         account_number: str,
     ) -> None:
         """Initialize the sensor."""
@@ -227,6 +366,7 @@ class SevernTrentMeterReadingSensor(CoordinatorEntity, SensorEntity):
         
         return attrs
 
+
 class SevernTrentEstimatedMeterReadingSensor(CoordinatorEntity, SensorEntity):
     """Sensor for estimated current meter reading based on official reading + daily usage."""
 
@@ -237,7 +377,7 @@ class SevernTrentEstimatedMeterReadingSensor(CoordinatorEntity, SensorEntity):
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator,
+        coordinator: SevernTrentDataCoordinator,
         account_number: str,
     ) -> None:
         """Initialize the sensor."""
@@ -249,15 +389,10 @@ class SevernTrentEstimatedMeterReadingSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> float | None:
         """Return the state of the sensor."""
-        if not self.coordinator.data:
+        if not self.coordinator.data or "manual_meter" not in self.coordinator.data:
             return None
         
-        manual_data = self.coordinator.data.get("manual_meter", {})
-        smart_data = self.coordinator.data.get("smart_meter", {})
-        
-        # Need both manual reading and usage data
-        if not manual_data or not smart_data:
-            return None
+        manual_data = self.coordinator.data["manual_meter"]
         
         latest_official = manual_data.get("latest_reading")
         official_date_str = manual_data.get("reading_date")
@@ -273,143 +408,89 @@ class SevernTrentEstimatedMeterReadingSensor(CoordinatorEntity, SensorEntity):
             _LOGGER.error("Could not parse official reading date '%s': %s", official_date_str, e)
             return None
         
-        _LOGGER.debug("Calculating estimated reading:")
-        _LOGGER.debug("  Official reading: %s on %s", latest_official, official_date)
+        # Query daily statistics from official date until now
+        statistic_id = f"severn_trent:{self._account_number}:daily_usage"
         
-        # IMPROVED CALCULATION:
-        # Use daily readings (all_readings) for more accurate estimation
-        all_readings = smart_data.get("all_readings", [])
+        start_time = datetime.combine(official_date + timedelta(days=1), datetime.min.time())
+        end_time = datetime.now()
         
-        if all_readings:
-            # Use daily readings for precise calculation
-            usage_since_official = 0
-            days_counted = 0
+        usage_since_official = 0
+        
+        try:
+            stats = statistics_during_period(
+                self.hass,
+                start_time,
+                end_time,
+                {statistic_id},
+                "day",
+                None,
+                {"sum"}
+            )
             
-            for reading in all_readings:
-                reading_date_str = reading.get("date")
-                reading_value = reading.get("usage", 0)
-                
-                if reading_date_str:
-                    try:
-                        reading_date_str_clean = reading_date_str.split("T")[0] if "T" in reading_date_str else reading_date_str
-                        reading_date = datetime.fromisoformat(reading_date_str_clean).date()
-                        
-                        # Only include readings AFTER the official reading date
-                        if reading_date > official_date:
-                            usage_since_official += reading_value
-                            days_counted += 1
-                            _LOGGER.debug("  Daily reading: %s = %s m³ (included)", reading_date, reading_value)
-                        else:
-                            _LOGGER.debug("  Daily reading: %s = %s m³ (skipped - on or before official date)", reading_date, reading_value)
-                    except (ValueError, AttributeError) as e:
-                        _LOGGER.warning("Could not parse reading date '%s': %s", reading_date_str, e)
-                        continue
-            
-            _LOGGER.debug("  Total usage since official (from %d daily readings): %s m³", days_counted, usage_since_official)
-        else:
-            # Fallback: use monthly readings if daily readings not available
-            monthly_readings = smart_data.get("monthly_readings", [])
-            usage_since_official = 0
-            
-            _LOGGER.debug("  No daily readings available, using monthly readings")
-            
-            for reading in monthly_readings:
-                reading_date_str = reading.get("start_date")
-                reading_value = reading.get("value", 0)
-                
-                if reading_date_str:
-                    try:
-                        reading_date_str_clean = reading_date_str.split("T")[0] if "T" in reading_date_str else reading_date_str
-                        reading_date = datetime.fromisoformat(reading_date_str_clean).date()
-                        
-                        # Only include complete months that start AFTER the official reading
-                        if reading_date > official_date:
-                            usage_since_official += reading_value
-                            _LOGGER.debug("  Monthly reading: %s = %s m³ (included)", reading_date, reading_value)
-                        else:
-                            _LOGGER.debug("  Monthly reading: %s = %s m³ (skipped)", reading_date, reading_value)
-                    except (ValueError, AttributeError) as e:
-                        _LOGGER.warning("Could not parse reading date '%s': %s", reading_date_str, e)
-                        continue
-            
-            _LOGGER.debug("  Total usage since official (from monthly readings): %s m³", usage_since_official)
+            if statistic_id in stats and stats[statistic_id]:
+                usage_since_official = sum(stat["sum"] for stat in stats[statistic_id] if stat.get("sum") is not None)
+        except Exception as e:
+            _LOGGER.warning("Could not calculate estimated meter reading: %s", e)
+            return latest_official
         
         estimated_current = latest_official + usage_since_official
-        _LOGGER.debug("  Estimated current: %s m³", estimated_current)
-        
         return round(estimated_current, 3)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
-        if not self.coordinator.data:
+        if not self.coordinator.data or "manual_meter" not in self.coordinator.data:
             return {}
         
-        manual_data = self.coordinator.data.get("manual_meter", {})
-        smart_data = self.coordinator.data.get("smart_meter", {})
-        
-        if not manual_data or not smart_data:
-            return {}
+        manual_data = self.coordinator.data["manual_meter"]
         
         latest_official = manual_data.get("latest_reading")
         official_date_str = manual_data.get("reading_date")
         
-        # Calculate usage since official reading
-        usage_since_official = 0
-        days_since_official = None
-        days_counted = 0
+        if not official_date_str:
+            return {}
         
-        if official_date_str:
+        try:
+            official_date_str_clean = official_date_str.split("T")[0] if "T" in official_date_str else official_date_str
+            official_date = datetime.fromisoformat(official_date_str_clean).date()
+            
+            # Calculate days since official reading
+            today = datetime.now().date()
+            days_since_official = (today - official_date).days
+            
+            # Get usage since official from statistics
+            statistic_id = f"severn_trent:{self._account_number}:daily_usage"
+            start_time = datetime.combine(official_date + timedelta(days=1), datetime.min.time())
+            end_time = datetime.now()
+            
+            usage_since_official = 0
+            days_counted = 0
+            
             try:
-                official_date_str_clean = official_date_str.split("T")[0] if "T" in official_date_str else official_date_str
-                official_date = datetime.fromisoformat(official_date_str_clean).date()
+                stats = statistics_during_period(
+                    self.hass,
+                    start_time,
+                    end_time,
+                    {statistic_id},
+                    "day",
+                    None,
+                    {"sum"}
+                )
                 
-                # Try to use daily readings first
-                all_readings = smart_data.get("all_readings", [])
-                
-                if all_readings:
-                    for reading in all_readings:
-                        reading_date_str = reading.get("date")
-                        if reading_date_str:
-                            try:
-                                reading_date_str_clean = reading_date_str.split("T")[0] if "T" in reading_date_str else reading_date_str
-                                reading_date = datetime.fromisoformat(reading_date_str_clean).date()
-                                if reading_date > official_date:
-                                    usage_since_official += reading.get("usage", 0)
-                                    days_counted += 1
-                            except (ValueError, AttributeError):
-                                continue
-                else:
-                    # Fallback to monthly readings
-                    monthly_readings = smart_data.get("monthly_readings", [])
-                    for reading in monthly_readings:
-                        reading_date_str = reading.get("start_date")
-                        if reading_date_str:
-                            try:
-                                reading_date_str_clean = reading_date_str.split("T")[0] if "T" in reading_date_str else reading_date_str
-                                reading_date = datetime.fromisoformat(reading_date_str_clean).date()
-                                if reading_date > official_date:
-                                    usage_since_official += reading.get("value", 0)
-                            except (ValueError, AttributeError):
-                                continue
-                
-                # Calculate days since official reading
-                today = datetime.now().date()
-                days_since_official = (today - official_date).days
-            except (ValueError, AttributeError) as e:
-                _LOGGER.error("Error calculating attributes: %s", e)
-        
-        attrs = {
-            "last_official_reading": latest_official,
-            "last_official_date": official_date_str,
-            "usage_since_official": round(usage_since_official, 3) if usage_since_official else None,
-            "days_since_official": days_since_official,
-        }
-        
-        if days_counted > 0:
-            attrs["daily_readings_used"] = days_counted
-            attrs["estimation_note"] = "Official reading + daily usage totals (only days after official reading)"
-        else:
-            attrs["estimation_note"] = "Official reading + monthly usage totals (only complete months after official reading)"
-        
-        return attrs
+                if statistic_id in stats and stats[statistic_id]:
+                    days_counted = len(stats[statistic_id])
+                    usage_since_official = sum(stat["sum"] for stat in stats[statistic_id] if stat.get("sum") is not None)
+            except Exception as e:
+                _LOGGER.warning("Could not get usage for attributes: %s", e)
+            
+            return {
+                "last_official_reading": latest_official,
+                "last_official_date": official_date_str,
+                "usage_since_official": round(usage_since_official, 3) if usage_since_official else None,
+                "days_since_official": days_since_official,
+                "daily_readings_used": days_counted,
+                "estimation_note": "Official reading + daily usage totals from statistics"
+            }
+        except (ValueError, AttributeError) as e:
+            _LOGGER.error("Error calculating attributes: %s", e)
+            return {}

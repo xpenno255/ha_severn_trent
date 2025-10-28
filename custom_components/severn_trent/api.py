@@ -184,41 +184,35 @@ class SevernTrentAPI:
             _LOGGER.error("Error fetching meter identifiers: %s", e, exc_info=True)
             return False
     
-    def get_meter_readings(self) -> dict[str, Any]:
-        """Get meter readings from the API."""
-        # Re-authenticate to ensure fresh token
-        if not self.authenticate():
-            _LOGGER.error("Failed to authenticate before fetching readings")
-            return {}
+    def _fetch_measurements(
+        self, 
+        start_date: datetime, 
+        end_date: datetime, 
+        frequency_type: str
+    ) -> list[dict]:
+        """
+        Fetch measurements from the API.
         
-        # Fetch meter identifiers if not already done
+        Args:
+            start_date: Start date for measurements
+            end_date: End date for measurements
+            frequency_type: One of HOUR_INTERVAL, DAY_INTERVAL, WEEK_INTERVAL, MONTH_INTERVAL
+            
+        Returns:
+            List of measurement nodes
+        """
+        self._ensure_valid_token()
+        
         if not self._fetch_meter_identifiers():
             _LOGGER.error("Failed to fetch meter identifiers")
-            return {}
-        
-        if not self.token:
-            _LOGGER.error("No token available after authentication!")
-            return {}
-        
-        _LOGGER.debug("Using token: %s... (length: %d)", self.token[:30], len(self.token))
-        
-        if not self.market_supply_point_id or not self.device_id:
-            _LOGGER.error("Missing marketSupplyPointId or deviceId")
-            return {}
+            return []
         
         try:
-            # Get yesterday's data (since today's data isn't available yet)
-            end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            start_date = end_date - timedelta(days=7)  # Get last 7 days for daily data
+            headers = {"Authorization": self.token}
             
-            _LOGGER.info("Fetching daily readings from %s to %s", start_date, end_date)
+            _LOGGER.debug("Fetching %s data from %s to %s", frequency_type, start_date, end_date)
             
-            headers = {
-                "Authorization": self.token
-            }
-            
-            # Fetch daily readings (last 7 days)
-            daily_response = self.session.post(
+            response = self.session.post(
                 API_URL,
                 headers=headers,
                 json={
@@ -229,7 +223,7 @@ class SevernTrentAPI:
                         "endAt": end_date.isoformat() + "Z",
                         "utilityFilters": [{
                             "waterFilters": {
-                                "readingFrequencyType": "HOUR_INTERVAL",
+                                "readingFrequencyType": frequency_type,
                                 "marketSupplyPointId": self.market_supply_point_id,
                                 "deviceId": self.device_id
                             }
@@ -239,82 +233,70 @@ class SevernTrentAPI:
                 }
             )
             
-            daily_response.raise_for_status()
-            daily_data = daily_response.json()
+            response.raise_for_status()
+            data = response.json()
             
-            if "errors" in daily_data:
-                _LOGGER.error("GraphQL errors fetching daily data: %s", daily_data["errors"])
-                return {}
+            if "errors" in data:
+                _LOGGER.error("GraphQL errors fetching %s data: %s", frequency_type, data["errors"])
+                return []
             
-            # Fetch monthly readings (last 12 months for estimation calculations)
-            monthly_start = end_date - timedelta(days=365)
-            _LOGGER.info("Fetching monthly readings from %s to %s", monthly_start, end_date)
+            if "data" not in data or "account" not in data["data"]:
+                _LOGGER.error("Unexpected API response structure for %s", frequency_type)
+                return []
             
-            monthly_response = self.session.post(
-                API_URL,
-                headers=headers,
-                json={
-                    "query": SMART_METER_READINGS_QUERY,
-                    "variables": {
-                        "accountNumber": self.account_number,
-                        "startAt": monthly_start.isoformat() + "Z",
-                        "endAt": end_date.isoformat() + "Z",
-                        "utilityFilters": [{
-                            "waterFilters": {
-                                "readingFrequencyType": "MONTH_INTERVAL",
-                                "marketSupplyPointId": self.market_supply_point_id,
-                                "deviceId": self.device_id
-                            }
-                        }]
-                    },
-                    "operationName": "SmartMeterReadings"
-                }
-            )
+            if data["data"]["account"] is None:
+                _LOGGER.error("Account is None in response for %s", frequency_type)
+                return []
             
-            monthly_response.raise_for_status()
-            monthly_data = monthly_response.json()
-            
-            if "errors" in monthly_data:
-                _LOGGER.error("GraphQL errors fetching monthly data: %s", monthly_data["errors"])
-                # Continue with just daily data
-                monthly_measurements = []
-            else:
-                monthly_properties = monthly_data.get("data", {}).get("account", {}).get("properties", [])
-                if monthly_properties:
-                    monthly_measurements = monthly_properties[0].get("measurements", {}).get("edges", [])
-                else:
-                    monthly_measurements = []
-            
-            # Process daily data
-            if "data" not in daily_data or "account" not in daily_data["data"]:
-                _LOGGER.error("Unexpected API response structure")
-                return {}
-            
-            if daily_data["data"]["account"] is None:
-                _LOGGER.error("Account is None in response")
-                return {}
-            
-            properties = daily_data["data"]["account"].get("properties", [])
+            properties = data["data"]["account"].get("properties", [])
             if not properties:
-                _LOGGER.warning("No properties in response")
-                return {}
+                _LOGGER.warning("No properties in response for %s", frequency_type)
+                return []
             
             measurements = properties[0].get("measurements", {}).get("edges", [])
-            _LOGGER.info("Found %d hourly measurements", len(measurements))
+            _LOGGER.info("Found %d %s measurements", len(measurements), frequency_type)
             
-            if not measurements:
-                _LOGGER.warning("No measurements found")
-                return {}
+            return [m["node"] for m in measurements]
             
-            # Group hourly measurements by day
-            daily_totals = {}
-            for measurement in measurements:
-                node = measurement["node"]
-                try:
-                    value = float(node["value"])
-                except (ValueError, TypeError):
-                    value = 0.0
-                    
+        except requests.exceptions.HTTPError as e:
+            _LOGGER.error("HTTP error fetching %s data: %s - Response: %s", 
+                         frequency_type, e, e.response.text if hasattr(e, 'response') else 'No response')
+            return []
+        except Exception as e:
+            _LOGGER.error("Error fetching %s data: %s", frequency_type, e, exc_info=True)
+            return []
+    
+    def fetch_hourly_data(self, start_date: datetime, end_date: datetime) -> list[dict]:
+        """Fetch hourly measurements for a date range."""
+        measurements = self._fetch_measurements(start_date, end_date, "HOUR_INTERVAL")
+        
+        # Process into structured format
+        hourly_data = []
+        for node in measurements:
+            try:
+                hourly_data.append({
+                    "start_at": node.get("startAt"),
+                    "end_at": node.get("endAt"),
+                    "value": float(node.get("value", 0)),
+                    "unit": node.get("unit", "m³"),
+                    "read_at": node.get("readAt"),
+                    "source": node.get("source", "")
+                })
+            except (ValueError, TypeError) as e:
+                _LOGGER.warning("Could not parse hourly measurement: %s", e)
+                continue
+        
+        return hourly_data
+    
+    def fetch_daily_data(self, start_date: datetime, end_date: datetime) -> list[dict]:
+        """Fetch daily measurements for a date range."""
+        measurements = self._fetch_measurements(start_date, end_date, "HOUR_INTERVAL")
+        
+        # Group hourly measurements by day
+        daily_totals = {}
+        for node in measurements:
+            try:
+                value = float(node.get("value", 0))
                 start_at = node.get("startAt")
                 
                 if start_at:
@@ -322,77 +304,50 @@ class SevernTrentAPI:
                     if date_str not in daily_totals:
                         daily_totals[date_str] = 0
                     daily_totals[date_str] += value
-            
-            _LOGGER.debug("Daily totals: %s", daily_totals)
-            
-            # Sort days by date (most recent first)
-            sorted_days = sorted(daily_totals.items(), key=lambda x: x[0], reverse=True)
-            
-            if not sorted_days:
-                _LOGGER.warning("No daily totals calculated")
-                return {}
-            
-            # Get yesterday's total (most recent complete day)
-            yesterday_date, yesterday_total = sorted_days[0]
-            
-            _LOGGER.info("Yesterday (%s): %s m³", yesterday_date, yesterday_total)
-            
-            # Calculate running total and build readings list
-            all_readings = []
-            total_usage = 0
-            
-            for date_str, daily_total in sorted_days:
-                all_readings.append({
-                    "value": round(daily_total, 3),
-                    "date": date_str,
-                    "unit": "m³"
-                })
-                total_usage += daily_total
-            
-            # Calculate average daily usage
-            num_days = len(all_readings)
-            avg_daily_usage = total_usage / num_days if num_days > 0 else 0
-            
-            # Process monthly data
-            monthly_readings = []
-            for measurement in monthly_measurements:
-                node = measurement["node"]
-                try:
-                    value = float(node["value"])
-                except (ValueError, TypeError):
-                    value = 0.0
-                
+            except (ValueError, TypeError) as e:
+                _LOGGER.warning("Could not parse daily measurement: %s", e)
+                continue
+        
+        # Convert to list format
+        daily_data = []
+        for date_str in sorted(daily_totals.keys()):
+            daily_data.append({
+                "date": date_str,
+                "value": round(daily_totals[date_str], 3),
+                "unit": "m³"
+            })
+        
+        return daily_data
+    
+    def fetch_monthly_data(self) -> list[dict]:
+        """Fetch monthly measurements (full year view)."""
+        # Fetch from start of available data to now
+        end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        # API seems to have data from June 2025, go back 12 months to be safe
+        start_date = end_date - timedelta(days=365)
+        
+        measurements = self._fetch_measurements(start_date, end_date, "MONTH_INTERVAL")
+        
+        # Process into structured format
+        monthly_data = []
+        for node in measurements:
+            try:
                 start_at = node.get("startAt")
-                
                 if start_at:
                     # Extract year-month
                     date_str = start_at.split("T")[0]
-                    monthly_readings.append({
-                        "value": round(value, 3),
+                    monthly_data.append({
                         "start_date": date_str,
-                        "unit": "m³"
+                        "end_date": node.get("endAt", "").split("T")[0] if node.get("endAt") else "",
+                        "value": round(float(node.get("value", 0)), 3),
+                        "unit": node.get("unit", "m³"),
+                        "source": node.get("source", "")
                     })
-            
-            _LOGGER.info("Found %d monthly readings", len(monthly_readings))
-            
-            return {
-                "meter_id": f"{self.market_supply_point_id}_{self.device_id}",
-                "yesterday_usage": round(yesterday_total, 3),
-                "yesterday_date": yesterday_date,
-                "daily_average": round(avg_daily_usage, 3),
-                "total_7day_usage": round(total_usage, 3),
-                "unit": "m³",
-                "all_readings": all_readings,
-                "monthly_readings": monthly_readings
-            }
-            
-        except requests.exceptions.HTTPError as e:
-            _LOGGER.error("HTTP error fetching meter readings: %s - Response: %s", 
-                         e, e.response.text if hasattr(e, 'response') else 'No response')
-            return {}
-        except Exception as e:
-            _LOGGER.error("Error fetching meter readings: %s", e, exc_info=True)
-            return {}
+            except (ValueError, TypeError) as e:
+                _LOGGER.warning("Could not parse monthly measurement: %s", e)
+                continue
+        
+        return monthly_data
     
     def get_manual_meter_readings(self) -> dict[str, Any]:
         """Get manual meter readings from the API."""
