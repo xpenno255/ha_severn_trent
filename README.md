@@ -325,11 +325,11 @@ All statistics can be used in Home Assistant's Energy Dashboard:
 
 1. Go to Settings → Dashboards → Energy
 2. Add Water source
-3. Select statistic: `severn_trent:{account}:daily_usage`
+3. Select statistic: `severn_trent:{account}:hourly_usage`
 4. Configure costs if desired
 
 You can also create custom energy cards using:
-- `severn_trent:{account}:hourly_usage` for detailed view
+- `severn_trent:{account}:daily_usage` for less detailed view
 - `severn_trent:{account}:weekly_usage` for weekly trends
 - `severn_trent:{account}:monthly_usage` for monthly comparison
 
