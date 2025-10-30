@@ -56,16 +56,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "api": api,
     }
     
-    # Backfill historical data if requested
-    backfill_enabled = entry.data.get("backfill_on_setup", False)
-    _LOGGER.info("Backfill setting: backfill_on_setup=%s", backfill_enabled)
-    
-    if backfill_enabled:
-        _LOGGER.info("Backfill requested, starting historical data import")
-        await coordinator.backfill_historical_data()
-        _LOGGER.info("Backfill completed")
-    else:
-        _LOGGER.warning("Backfill was NOT enabled during setup. To backfill data, call service: severn_trent.backfill_history")
+    # Always backfill historical data on first setup
+    # This ensures new installs and upgrades both get historical data
+    _LOGGER.info("Starting historical data import")
+    await coordinator.backfill_historical_data()
+    _LOGGER.info("Historical data import completed")
     
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

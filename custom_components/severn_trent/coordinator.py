@@ -554,8 +554,8 @@ class SevernTrentDataCoordinator(DataUpdateCoordinator):
             
             now = datetime.now()
             
-            # Fetch last 7 days of hourly data
-            hourly_start = datetime.combine((now - timedelta(days=7)).date(), dt_time.min)
+            # Fetch last 60 days of hourly data (matching daily data range)
+            hourly_start = datetime.combine((now - timedelta(days=60)).date(), dt_time.min)
             hourly_end = datetime.combine(now.date(), dt_time.min)
             
             _LOGGER.debug("⚠️ Step 3: Fetching hourly data from %s to %s", hourly_start, hourly_end)
