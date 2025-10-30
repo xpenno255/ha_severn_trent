@@ -210,7 +210,9 @@ class SevernTrentAPI:
         try:
             headers = {"Authorization": self.token}
             
-            _LOGGER.debug("Fetching %s data from %s to %s", frequency_type, start_date, end_date)
+            _LOGGER.warning("🌐 API: Fetching %s data from %s to %s", frequency_type, start_date, end_date)
+            _LOGGER.warning("🌐 API: Using account=%s, MSPID=%s, deviceID=%s", 
+                          self.account_number, self.market_supply_point_id, self.device_id)
             
             response = self.session.post(
                 API_URL,
@@ -230,11 +232,16 @@ class SevernTrentAPI:
                         }]
                     },
                     "operationName": "SmartMeterReadings"
-                }
+                },
+                timeout=30  # 30 second timeout
             )
+            
+            _LOGGER.warning("🌐 API: Response received, status code: %d", response.status_code)
             
             response.raise_for_status()
             data = response.json()
+            
+            _LOGGER.warning("🌐 API: Response parsed successfully")
             
             if "errors" in data:
                 _LOGGER.error("GraphQL errors fetching %s data: %s", frequency_type, data["errors"])
@@ -254,10 +261,19 @@ class SevernTrentAPI:
                 return []
             
             measurements = properties[0].get("measurements", {}).get("edges", [])
-            _LOGGER.info("Found %d %s measurements", len(measurements), frequency_type)
+            _LOGGER.warning("🌐 API: Found %d %s measurements", len(measurements), frequency_type)
+            
+            # Log sample data for debugging
+            if measurements and len(measurements) > 0:
+                sample = measurements[0].get("node", {})
+                _LOGGER.warning("🌐 API: Sample measurement: startAt=%s, value=%s, unit=%s", 
+                              sample.get("startAt"), sample.get("value"), sample.get("unit"))
             
             return [m["node"] for m in measurements]
             
+        except requests.exceptions.Timeout:
+            _LOGGER.error("Timeout fetching %s data - API took longer than 30 seconds", frequency_type)
+            return []
         except requests.exceptions.HTTPError as e:
             _LOGGER.error("HTTP error fetching %s data: %s - Response: %s", 
                          frequency_type, e, e.response.text if hasattr(e, 'response') else 'No response')
@@ -289,12 +305,78 @@ class SevernTrentAPI:
         return hourly_data
     
     def fetch_daily_data(self, start_date: datetime, end_date: datetime) -> list[dict]:
-        """Fetch daily measurements for a date range."""
-        measurements = self._fetch_measurements(start_date, end_date, "HOUR_INTERVAL")
+        """Fetch daily measurements - tries DAY_INTERVAL first, falls back to hourly aggregation."""
+        # First try DAY_INTERVAL - Severn Trent provides daily aggregates
+        _LOGGER.warning("🌐 API: Fetching daily data using DAY_INTERVAL from %s to %s", start_date, end_date)
+        measurements = self._fetch_measurements(start_date, end_date, "DAY_INTERVAL")
         
-        # Group hourly measurements by day
+        if measurements:
+            _LOGGER.warning("🌐 API: DAY_INTERVAL returned %d measurements", len(measurements))
+            daily_data = []
+            for node in measurements:
+                try:
+                    start_at = node.get("startAt")
+                    if start_at:
+                        date_str = start_at.split("T")[0]
+                        value = float(node.get("value", 0))
+                        daily_data.append({
+                            "date": date_str,
+                            "value": round(value, 3),
+                            "unit": node.get("unit", "m³")
+                        })
+                        if len(daily_data) <= 3:
+                            _LOGGER.warning("🌐 API: Daily - Date: %s, Value: %.3f m³", date_str, value)
+                except (ValueError, TypeError) as e:
+                    _LOGGER.warning("Could not parse daily measurement: %s", e)
+                    continue
+            
+            daily_data.sort(key=lambda x: x["date"])
+            
+            # Check if we have data for recent dates (last 2 days)
+            today = datetime.now().date()
+            yesterday = today - timedelta(days=1)
+            day_before = today - timedelta(days=2)
+            
+            recent_dates = {yesterday.isoformat(), day_before.isoformat()}
+            existing_dates = {d["date"] for d in daily_data}
+            missing_recent = recent_dates - existing_dates
+            
+            if missing_recent:
+                _LOGGER.warning("🌐 API: DAY_INTERVAL missing recent dates: %s, will fetch hourly data", missing_recent)
+                # Fetch hourly data for the missing dates
+                for date_str in sorted(missing_recent):
+                    date_obj = datetime.fromisoformat(date_str).date()
+                    hourly_start = datetime.combine(date_obj, dt_time.min)
+                    hourly_end = datetime.combine(date_obj + timedelta(days=1), dt_time.min)
+                    
+                    hourly_measurements = self._fetch_measurements(hourly_start, hourly_end, "HOUR_INTERVAL")
+                    if hourly_measurements:
+                        daily_total = sum(float(m.get("value", 0)) for m in hourly_measurements)
+                        daily_data.append({
+                            "date": date_str,
+                            "value": round(daily_total, 3),
+                            "unit": "m³"
+                        })
+                        _LOGGER.warning("🌐 API: Added from hourly - Date: %s, Value: %.3f m³", date_str, daily_total)
+                
+                # Re-sort after adding hourly data
+                daily_data.sort(key=lambda x: x["date"])
+            
+            _LOGGER.warning("🌐 API: Returning %d daily data points", len(daily_data))
+            return daily_data
+        
+        # If DAY_INTERVAL returns nothing, fall back to hourly aggregation
+        _LOGGER.warning("🌐 API: DAY_INTERVAL returned no data, falling back to hourly aggregation")
+        hourly_measurements = self._fetch_measurements(start_date, end_date, "HOUR_INTERVAL")
+        
+        if not hourly_measurements:
+            _LOGGER.warning("🌐 API: No hourly data available either")
+            return []
+        
+        _LOGGER.warning("🌐 API: Aggregating %d hourly measurements into daily totals", len(hourly_measurements))
+        
         daily_totals = {}
-        for node in measurements:
+        for node in hourly_measurements:
             try:
                 value = float(node.get("value", 0))
                 start_at = node.get("startAt")
@@ -305,18 +387,21 @@ class SevernTrentAPI:
                         daily_totals[date_str] = 0
                     daily_totals[date_str] += value
             except (ValueError, TypeError) as e:
-                _LOGGER.warning("Could not parse daily measurement: %s", e)
+                _LOGGER.warning("Could not parse measurement: %s", e)
                 continue
         
-        # Convert to list format
         daily_data = []
         for date_str in sorted(daily_totals.keys()):
+            value = daily_totals[date_str]
             daily_data.append({
                 "date": date_str,
-                "value": round(daily_totals[date_str], 3),
+                "value": round(value, 3),
                 "unit": "m³"
             })
+            if len(daily_data) <= 3:
+                _LOGGER.warning("🌐 API: Aggregated - Date: %s, Value: %.3f m³", date_str, value)
         
+        _LOGGER.warning("🌐 API: Returning %d daily data points from aggregation", len(daily_data))
         return daily_data
     
     def fetch_monthly_data(self) -> list[dict]:

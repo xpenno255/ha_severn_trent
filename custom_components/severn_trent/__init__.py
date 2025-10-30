@@ -45,7 +45,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     
     # Perform first refresh
+    _LOGGER.info("Performing first coordinator refresh")
     await coordinator.async_config_entry_first_refresh()
+    _LOGGER.info("First refresh completed")
     
     # Store coordinator
     hass.data.setdefault(DOMAIN, {})
@@ -55,9 +57,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
     
     # Backfill historical data if requested
-    if entry.data.get("backfill_on_setup", False):
+    backfill_enabled = entry.data.get("backfill_on_setup", False)
+    _LOGGER.info("Backfill setting: backfill_on_setup=%s", backfill_enabled)
+    
+    if backfill_enabled:
         _LOGGER.info("Backfill requested, starting historical data import")
         await coordinator.backfill_historical_data()
+        _LOGGER.info("Backfill completed")
+    else:
+        _LOGGER.warning("Backfill was NOT enabled during setup. To backfill data, call service: severn_trent.backfill_history")
     
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -65,29 +73,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register services
     async def handle_backfill(call: ServiceCall) -> None:
         """Handle the backfill service call."""
+        _LOGGER.warning("🔥 BACKFILL SERVICE CALLED - Service handler is executing!")
         _LOGGER.info("Backfill service called")
         
         # Find the coordinator for this account
         account_number = call.data.get("account_number")
         
         if account_number:
+            _LOGGER.warning("🔥 Looking for specific account: %s", account_number)
             # Find entry with matching account number
             for entry_id, data in hass.data[DOMAIN].items():
                 if isinstance(data, dict) and data.get("coordinator"):
                     coord = data["coordinator"]
                     if coord.account_number == account_number:
+                        _LOGGER.warning("🔥 Found coordinator, calling backfill...")
                         await coord.backfill_historical_data()
-                        _LOGGER.info("Backfill completed for account %s", account_number)
+                        _LOGGER.warning("🔥 Backfill completed for account %s", account_number)
                         return
             
             _LOGGER.error("Could not find account %s", account_number)
         else:
+            _LOGGER.warning("🔥 Backfilling ALL accounts")
             # Backfill all accounts
+            count = 0
             for entry_id, data in hass.data[DOMAIN].items():
                 if isinstance(data, dict) and data.get("coordinator"):
                     coord = data["coordinator"]
+                    _LOGGER.warning("🔥 Found coordinator for account %s, calling backfill...", coord.account_number)
                     await coord.backfill_historical_data()
-                    _LOGGER.info("Backfill completed for account %s", coord.account_number)
+                    _LOGGER.warning("🔥 Backfill completed for account %s", coord.account_number)
+                    count += 1
+            
+            _LOGGER.warning("🔥 Processed %d account(s)", count)
     
     # Register the backfill service
     hass.services.async_register(

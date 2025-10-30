@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, time as dt_time
 from typing import Any
 
@@ -41,21 +42,33 @@ class SevernTrentDataCoordinator(DataUpdateCoordinator):
         """Fetch data from API."""
         now = datetime.now()
         
+        _LOGGER.info("=== Coordinator Update Starting ===")
+        _LOGGER.info("Current time: %s (hour: %d)", now, now.hour)
+        
         # Check if it's 6am or if we have missing data
         is_scheduled_time = now.hour == 6
         has_missing_data = len(self.missing_dates) > 0
         
+        _LOGGER.info("Is scheduled time (6am): %s", is_scheduled_time)
+        _LOGGER.info("Has missing data: %s (missing dates: %s)", has_missing_data, self.missing_dates)
+        
         # If it's not 6am and we don't have missing data, just return existing data
         if not is_scheduled_time and not has_missing_data:
-            _LOGGER.debug("Not scheduled update time (6am) and no missing data, skipping update")
+            _LOGGER.info("Not scheduled update time and no missing data, skipping update")
+            _LOGGER.info("Returning existing data: %s", "empty" if not self.data else f"{len(self.data)} keys")
             return self.data or {}
+        
+        _LOGGER.info("Proceeding with data fetch...")
         
         try:
             # Authenticate first
+            _LOGGER.info("Authenticating...")
             if not await self.hass.async_add_executor_job(self.api.authenticate):
                 _LOGGER.error("Authentication failed during update")
                 self.fetch_status = "failed"
                 raise UpdateFailed("Authentication failed")
+            
+            _LOGGER.info("Authentication successful")
             
             # Determine what date to fetch
             yesterday = (now - timedelta(days=1)).date()
@@ -73,42 +86,54 @@ class SevernTrentDataCoordinator(DataUpdateCoordinator):
             start_dt = datetime.combine(fetch_date, dt_time.min)
             end_dt = datetime.combine(fetch_date + timedelta(days=1), dt_time.min)
             
+            _LOGGER.info("Fetching hourly data from %s to %s", start_dt, end_dt)
             hourly_data = await self.hass.async_add_executor_job(
                 self.api.fetch_hourly_data, start_dt, end_dt
             )
+            _LOGGER.info("Received %d hourly readings", len(hourly_data) if hourly_data else 0)
             
             # Fetch last 14 days of daily data (for week calculations)
             daily_start = datetime.combine(fetch_date - timedelta(days=13), dt_time.min)
             daily_end = datetime.combine(fetch_date + timedelta(days=1), dt_time.min)
             
+            _LOGGER.info("Fetching daily data from %s to %s", daily_start, daily_end)
             daily_data = await self.hass.async_add_executor_job(
                 self.api.fetch_daily_data, daily_start, daily_end
             )
+            _LOGGER.info("Received %d daily readings", len(daily_data) if daily_data else 0)
             
             # Fetch monthly data (includes current month partial)
+            _LOGGER.info("Fetching monthly data")
             monthly_data = await self.hass.async_add_executor_job(
                 self.api.fetch_monthly_data
             )
+            _LOGGER.info("Received %d monthly readings", len(monthly_data) if monthly_data else 0)
             
             # Fetch manual meter readings
+            _LOGGER.info("Fetching manual meter readings")
             manual_data = await self.hass.async_add_executor_job(
                 self.api.get_manual_meter_readings
             )
+            _LOGGER.info("Manual meter data: %s", "received" if manual_data else "empty")
             
             # Inject hourly statistics
             if hourly_data:
+                _LOGGER.info("Injecting hourly statistics...")
                 await self._inject_hourly_statistics(hourly_data)
             
             # Inject daily statistics
             if daily_data:
+                _LOGGER.info("Injecting daily statistics...")
                 await self._inject_daily_statistics(daily_data)
             
             # Calculate and inject weekly statistics
             if daily_data:
+                _LOGGER.info("Injecting weekly statistics...")
                 await self._inject_weekly_statistics(daily_data)
             
             # Inject monthly statistics
             if monthly_data:
+                _LOGGER.info("Injecting monthly statistics...")
                 await self._inject_monthly_statistics(monthly_data)
             
             # Update success tracking
@@ -120,9 +145,12 @@ class SevernTrentDataCoordinator(DataUpdateCoordinator):
                 self.missing_dates.remove(fetch_date_str)
             
             # Calculate current values for sensors
+            _LOGGER.info("Calculating sensor values...")
             result = await self._calculate_sensor_values(daily_data, monthly_data, manual_data)
             
             _LOGGER.info("Successfully updated data for %s", fetch_date)
+            _LOGGER.info("Result keys: %s", list(result.keys()) if result else "none")
+            _LOGGER.info("=== Coordinator Update Complete ===")
             return result
             
         except Exception as err:
@@ -137,27 +165,37 @@ class SevernTrentDataCoordinator(DataUpdateCoordinator):
     
     async def _inject_hourly_statistics(self, hourly_data: list[dict]) -> None:
         """Inject hourly usage data into Home Assistant statistics."""
-        statistic_id = f"severn_trent:{self.account_number}:hourly_usage"
+        # Sanitize account number for statistic_id (only lowercase alphanumeric and underscores)
+        safe_account = re.sub(r'[^a-z0-9_]', '_', self.account_number.lower())
+        statistic_id = f"severn_trent:{safe_account}_hourly_usage"
+        
+        _LOGGER.info("Creating hourly statistics with ID: %s (account: %s)", statistic_id, self.account_number)
         
         metadata = StatisticMetaData(
             has_mean=False,
             has_sum=True,
-            name="Severn Trent Hourly Usage",
+            name=f"Severn Trent Hourly Usage ({self.account_number})",
             source="severn_trent",
             statistic_id=statistic_id,
             unit_of_measurement=UnitOfVolume.CUBIC_METERS,
         )
         
         statistics = []
+        cumulative_sum = 0
+        
         for reading in hourly_data:
             try:
                 start_dt = datetime.fromisoformat(reading["start_at"].replace("Z", "+00:00"))
+                value = reading["value"]
                 
+                cumulative_sum += value
+                
+                # For external statistics: sum = cumulative total
                 statistics.append(
                     StatisticData(
                         start=start_dt,
-                        state=reading["value"],
-                        sum=reading["value"],
+                        sum=cumulative_sum,  # CUMULATIVE total
+                        state=value,         # This hour's usage
                     )
                 )
             except (ValueError, KeyError) as e:
@@ -165,51 +203,72 @@ class SevernTrentDataCoordinator(DataUpdateCoordinator):
                 continue
         
         if statistics:
-            async_add_external_statistics(self.hass, metadata, statistics)
-            _LOGGER.info("Injected %d hourly statistics", len(statistics))
+            _LOGGER.info("Attempting to inject %d hourly statistics", len(statistics))
+            await get_instance(self.hass).async_add_executor_job(
+                async_add_external_statistics, self.hass, metadata, statistics
+            )
+            _LOGGER.info("Successfully injected %d hourly statistics", len(statistics))
     
     async def _inject_daily_statistics(self, daily_data: list[dict]) -> None:
         """Inject daily usage data into Home Assistant statistics."""
-        statistic_id = f"severn_trent:{self.account_number}:daily_usage"
+        safe_account = re.sub(r'[^a-z0-9_]', '_', self.account_number.lower())
+        statistic_id = f"severn_trent:{safe_account}_daily_usage"
+        
+        _LOGGER.debug("📊 STATS: Preparing to inject %d daily statistics", len(daily_data))
         
         metadata = StatisticMetaData(
             has_mean=False,
-            has_sum=True,
-            name="Severn Trent Daily Usage",
+            has_sum=True,  # Energy Dashboard requires sum for water
+            name=f"Severn Trent Daily Usage ({self.account_number})",
             source="severn_trent",
             statistic_id=statistic_id,
             unit_of_measurement=UnitOfVolume.CUBIC_METERS,
         )
         
         statistics = []
+        cumulative_sum = 0  # Running total
+        
         for reading in daily_data:
             try:
                 # Use the date at midnight
                 date_dt = datetime.fromisoformat(reading["date"] + "T00:00:00+00:00")
+                value = reading["value"]
+                
+                # Calculate cumulative sum (total usage up to this point)
+                cumulative_sum += value
                 
                 statistics.append(
                     StatisticData(
                         start=date_dt,
-                        state=reading["value"],
-                        sum=reading["value"],
+                        sum=cumulative_sum,  # CUMULATIVE total
+                        state=value,          # Individual day's usage
                     )
                 )
+                
+                # Log ALL values being injected
+                _LOGGER.debug("📊 STATS: Injecting daily - Date: %s, Value: %.3f m³, Cumulative: %.3f m³", 
+                              reading["date"], value, cumulative_sum)
+                    
             except (ValueError, KeyError) as e:
                 _LOGGER.warning("Could not process daily statistic: %s", e)
                 continue
         
         if statistics:
-            async_add_external_statistics(self.hass, metadata, statistics)
+            _LOGGER.debug("📊 STATS: Injecting %d daily statistics to ID: %s", len(statistics), statistic_id)
+            await get_instance(self.hass).async_add_executor_job(
+                async_add_external_statistics, self.hass, metadata, statistics
+            )
             _LOGGER.info("Injected %d daily statistics", len(statistics))
     
     async def _inject_weekly_statistics(self, daily_data: list[dict]) -> None:
         """Calculate and inject weekly usage statistics (Monday-Sunday)."""
-        statistic_id = f"severn_trent:{self.account_number}:weekly_usage"
+        safe_account = re.sub(r'[^a-z0-9_]', '_', self.account_number.lower())
+        statistic_id = f"severn_trent:{safe_account}_weekly_usage"
         
         metadata = StatisticMetaData(
             has_mean=False,
             has_sum=True,
-            name="Severn Trent Weekly Usage",
+            name=f"Severn Trent Weekly Usage ({self.account_number})",
             source="severn_trent",
             statistic_id=statistic_id,
             unit_of_measurement=UnitOfVolume.CUBIC_METERS,
@@ -245,48 +304,61 @@ class SevernTrentDataCoordinator(DataUpdateCoordinator):
         
         # Create statistics only for complete weeks (Sunday reached)
         statistics = []
+        cumulative_sum = 0
+        
         for week_key, week_data in weekly_totals.items():
-            # Only add if we have data through Sunday or week is complete
+            # Store on Sunday's date with UTC timezone
             week_end_dt = datetime.combine(week_data["end"], dt_time.min)
+            # Add UTC timezone info
+            from datetime import timezone
+            week_end_dt = week_end_dt.replace(tzinfo=timezone.utc)
             
-            # Store on Sunday's date
+            cumulative_sum += week_data["total"]
+            
             statistics.append(
                 StatisticData(
-                    start=week_end_dt.replace(tzinfo=None),
-                    state=round(week_data["total"], 3),
-                    sum=round(week_data["total"], 3),
+                    start=week_end_dt,
+                    sum=cumulative_sum,  # CUMULATIVE total
+                    state=round(week_data["total"], 3),  # This week's usage
                 )
             )
         
         if statistics:
-            async_add_external_statistics(self.hass, metadata, statistics)
+            await get_instance(self.hass).async_add_executor_job(
+                async_add_external_statistics, self.hass, metadata, statistics
+            )
             _LOGGER.info("Injected %d weekly statistics", len(statistics))
     
     async def _inject_monthly_statistics(self, monthly_data: list[dict]) -> None:
         """Inject monthly usage data into Home Assistant statistics."""
-        statistic_id = f"severn_trent:{self.account_number}:monthly_usage"
+        safe_account = re.sub(r'[^a-z0-9_]', '_', self.account_number.lower())
+        statistic_id = f"severn_trent:{safe_account}_monthly_usage"
         
         metadata = StatisticMetaData(
             has_mean=False,
             has_sum=True,
-            name="Severn Trent Monthly Usage",
+            name=f"Severn Trent Monthly Usage ({self.account_number})",
             source="severn_trent",
             statistic_id=statistic_id,
             unit_of_measurement=UnitOfVolume.CUBIC_METERS,
         )
         
         statistics = []
+        cumulative_sum = 0
+        
         for reading in monthly_data:
             try:
                 # Use the end date of the month (or current date for partial month)
                 end_date_str = reading.get("end_date") or reading["start_date"]
                 end_dt = datetime.fromisoformat(end_date_str + "T00:00:00+00:00")
                 
+                cumulative_sum += reading["value"]
+                
                 statistics.append(
                     StatisticData(
                         start=end_dt,
-                        state=reading["value"],
-                        sum=reading["value"],
+                        sum=cumulative_sum,      # CUMULATIVE total
+                        state=reading["value"],  # This month's usage
                     )
                 )
             except (ValueError, KeyError) as e:
@@ -294,7 +366,9 @@ class SevernTrentDataCoordinator(DataUpdateCoordinator):
                 continue
         
         if statistics:
-            async_add_external_statistics(self.hass, metadata, statistics)
+            await get_instance(self.hass).async_add_executor_job(
+                async_add_external_statistics, self.hass, metadata, statistics
+            )
             _LOGGER.info("Injected %d monthly statistics", len(statistics))
     
     async def _calculate_sensor_values(
@@ -307,13 +381,28 @@ class SevernTrentDataCoordinator(DataUpdateCoordinator):
         now = datetime.now()
         yesterday = (now - timedelta(days=1)).date()
         
+        _LOGGER.debug("📊 SENSORS: Calculating sensor values for date: %s", yesterday)
+        _LOGGER.debug("📊 SENSORS: Received %d daily readings", len(daily_data) if daily_data else 0)
+        
+        # Log the dates we have data for
+        if daily_data:
+            dates = [d["date"] for d in daily_data]
+            _LOGGER.debug("📊 SENSORS: Daily data dates: %s ... %s (%d days)", 
+                          dates[0] if dates else "none", 
+                          dates[-1] if dates else "none", 
+                          len(dates))
+        
         # Previous day usage
         previous_day_usage = 0
         if daily_data:
             for reading in daily_data:
                 if reading["date"] == yesterday.isoformat():
                     previous_day_usage = reading["value"]
+                    _LOGGER.debug("📊 SENSORS: Found yesterday (%s): %.3f m³", yesterday, previous_day_usage)
                     break
+        
+        if previous_day_usage == 0:
+            _LOGGER.warning("📊 SENSORS: WARNING - No data found for yesterday (%s)", yesterday)
         
         # Week to date (current week Monday-Sunday)
         days_since_monday = now.weekday()
@@ -337,9 +426,18 @@ class SevernTrentDataCoordinator(DataUpdateCoordinator):
                     month_to_date = reading["value"]
                     break
         
-        # Overnight usage (2am-5am from yesterday) - will be calculated from hourly data
-        # For now, we'll calculate it when we have the hourly data stored
-        overnight_usage = None  # Will be populated by sensor from statistics
+        # Overnight usage (2am-5am from yesterday's hourly data)
+        overnight_usage = await self._calculate_overnight_usage(yesterday)
+        
+        # Estimated meter reading
+        estimated_reading = None
+        usage_since_official = None
+        days_since_official = None
+        
+        if manual_data and manual_data.get("latest_reading"):
+            estimated_reading, usage_since_official, days_since_official = await self._calculate_estimated_meter_reading(
+                manual_data, daily_data
+            )
         
         return {
             "last_successful_update": self.last_successful_update,
@@ -359,18 +457,100 @@ class SevernTrentDataCoordinator(DataUpdateCoordinator):
                 "usage": round(month_to_date, 3),
             },
             "overnight_usage": overnight_usage,
+            "estimated_meter_reading": estimated_reading,
+            "usage_since_official": usage_since_official,
+            "days_since_official": days_since_official,
             "manual_meter": manual_data,
         }
     
+    async def _calculate_overnight_usage(self, date: datetime.date) -> float | None:
+        """Calculate overnight usage (2am-5am) for a specific date from statistics."""
+        from homeassistant.components.recorder.statistics import (
+            statistics_during_period,
+        )
+        
+        safe_account = re.sub(r'[^a-z0-9_]', '_', self.account_number.lower())
+        statistic_id = f"severn_trent:{safe_account}_hourly_usage"
+        
+        start_time = datetime.combine(date, dt_time(hour=2))
+        end_time = datetime.combine(date, dt_time(hour=6))
+        
+        try:
+            # Use executor via get_instance for database operations
+            stats = await get_instance(self.hass).async_add_executor_job(
+                statistics_during_period,
+                self.hass,
+                start_time,
+                end_time,
+                {statistic_id},
+                "hour",
+                None,
+                {"sum"}
+            )
+            
+            if statistic_id in stats and stats[statistic_id]:
+                # Sum the STATE values (individual hourly usage), not cumulative sums
+                total = sum(stat["state"] for stat in stats[statistic_id] if stat.get("state") is not None)
+                return round(total, 3)
+        except Exception as e:
+            _LOGGER.warning("Could not calculate overnight usage: %s", e)
+        
+        return None
+    
+    async def _calculate_estimated_meter_reading(
+        self, 
+        manual_data: dict,
+        daily_data: list[dict]
+    ) -> tuple[float | None, float | None, int | None]:
+        """Calculate estimated meter reading from official reading + daily usage."""
+        latest_official = manual_data.get("latest_reading")
+        official_date_str = manual_data.get("reading_date")
+        
+        if not latest_official or not official_date_str:
+            return None, None, None
+        
+        try:
+            # Parse official reading date
+            official_date_str_clean = official_date_str.split("T")[0] if "T" in official_date_str else official_date_str
+            official_date = datetime.fromisoformat(official_date_str_clean).date()
+            
+            # Calculate usage since official reading from daily data
+            usage_since_official = 0
+            for reading in daily_data:
+                reading_date = datetime.fromisoformat(reading["date"]).date()
+                if reading_date > official_date:
+                    usage_since_official += reading["value"]
+            
+            # Calculate days since official reading
+            today = datetime.now().date()
+            days_since_official = (today - official_date).days
+            
+            estimated_reading = latest_official + usage_since_official
+            
+            return (
+                round(estimated_reading, 3),
+                round(usage_since_official, 3),
+                days_since_official
+            )
+            
+        except Exception as e:
+            _LOGGER.error("Error calculating estimated meter reading: %s", e)
+            return latest_official, None, None
+    
     async def backfill_historical_data(self) -> None:
         """Backfill historical data from the API."""
+        # This should ALWAYS appear in logs
+        _LOGGER.warning("⚠️ SEVERN TRENT BACKFILL STARTING - If you see this, logging is working!")
         _LOGGER.info("Starting historical data backfill")
         
         try:
             # Authenticate
+            _LOGGER.debug("⚠️ Step 1: Authenticating with API")
             if not await self.hass.async_add_executor_job(self.api.authenticate):
                 _LOGGER.error("Authentication failed during backfill")
                 return
+            
+            _LOGGER.debug("⚠️ Step 2: Authentication successful")
             
             now = datetime.now()
             
@@ -378,40 +558,99 @@ class SevernTrentDataCoordinator(DataUpdateCoordinator):
             hourly_start = datetime.combine((now - timedelta(days=7)).date(), dt_time.min)
             hourly_end = datetime.combine(now.date(), dt_time.min)
             
-            _LOGGER.info("Backfilling hourly data from %s to %s", hourly_start, hourly_end)
+            _LOGGER.debug("⚠️ Step 3: Fetching hourly data from %s to %s", hourly_start, hourly_end)
             hourly_data = await self.hass.async_add_executor_job(
                 self.api.fetch_hourly_data, hourly_start, hourly_end
             )
             
+            _LOGGER.debug("⚠️ Step 4: Received %d hourly data points", len(hourly_data) if hourly_data else 0)
+            _LOGGER.debug("⚠️ Step 4a: Type of hourly_data: %s", type(hourly_data))
+            
             if hourly_data:
-                await self._inject_hourly_statistics(hourly_data)
-                _LOGGER.info("Backfilled hourly data: %d records", len(hourly_data))
+                _LOGGER.debug("⚠️ Step 4b: Sample item: %s", str(hourly_data[0])[:200] if len(hourly_data) > 0 else "empty")
+                _LOGGER.debug("⚠️ Step 5: About to inject hourly statistics...")
+                try:
+                    await self._inject_hourly_statistics(hourly_data)
+                    _LOGGER.debug("⚠️ Step 6: Hourly statistics injection complete")
+                except Exception as e:
+                    _LOGGER.error("⚠️ ERROR in Step 5/6: %s", e, exc_info=True)
+            else:
+                _LOGGER.warning("No hourly data received from API")
             
             # Fetch last 60 days of daily data
             daily_start = datetime.combine((now - timedelta(days=60)).date(), dt_time.min)
             daily_end = datetime.combine(now.date(), dt_time.min)
             
-            _LOGGER.info("Backfilling daily data from %s to %s", daily_start, daily_end)
+            _LOGGER.debug("⚠️ Step 7: Fetching daily data from %s to %s", daily_start, daily_end)
             daily_data = await self.hass.async_add_executor_job(
                 self.api.fetch_daily_data, daily_start, daily_end
             )
             
+            _LOGGER.debug("⚠️ Step 8: Received %d daily data points", len(daily_data) if daily_data else 0)
+            
             if daily_data:
-                await self._inject_daily_statistics(daily_data)
-                await self._inject_weekly_statistics(daily_data)
-                _LOGGER.info("Backfilled daily data: %d records", len(daily_data))
+                _LOGGER.debug("⚠️ Step 9: Injecting daily statistics")
+                try:
+                    await self._inject_daily_statistics(daily_data)
+                    _LOGGER.debug("⚠️ Step 10: Daily statistics injection complete")
+                except Exception as e:
+                    _LOGGER.error("⚠️ ERROR in Step 9/10: %s", e, exc_info=True)
+                
+                _LOGGER.debug("⚠️ Step 11: Injecting weekly statistics")
+                try:
+                    await self._inject_weekly_statistics(daily_data)
+                    _LOGGER.debug("⚠️ Step 12: Weekly statistics injection complete")
+                except Exception as e:
+                    _LOGGER.error("⚠️ ERROR in Step 11/12: %s", e, exc_info=True)
+            else:
+                _LOGGER.warning("No daily data received from API")
             
             # Fetch all available monthly data
-            _LOGGER.info("Backfilling monthly data")
+            _LOGGER.debug("⚠️ Step 13: Fetching monthly data")
             monthly_data = await self.hass.async_add_executor_job(
                 self.api.fetch_monthly_data
             )
             
-            if monthly_data:
-                await self._inject_monthly_statistics(monthly_data)
-                _LOGGER.info("Backfilled monthly data: %d records", len(monthly_data))
+            _LOGGER.debug("⚠️ Step 14: Received %d monthly data points", len(monthly_data) if monthly_data else 0)
             
-            _LOGGER.info("Historical data backfill completed successfully")
+            if monthly_data:
+                _LOGGER.debug("⚠️ Step 15: Injecting monthly statistics")
+                try:
+                    await self._inject_monthly_statistics(monthly_data)
+                    _LOGGER.debug("⚠️ Step 16: Monthly statistics injection complete")
+                except Exception as e:
+                    _LOGGER.error("⚠️ ERROR in Step 15/16: %s", e, exc_info=True)
+            else:
+                _LOGGER.warning("No monthly data received from API")
+            
+            # Fetch manual meter readings for sensor calculations
+            _LOGGER.debug("⚠️ Step 17: Fetching manual meter readings")
+            manual_data = await self.hass.async_add_executor_job(
+                self.api.get_manual_meter_readings
+            )
+            _LOGGER.debug("⚠️ Step 18: Manual meter data received: %s", "yes" if manual_data else "no")
+            
+            # Calculate sensor values using the fetched data
+            _LOGGER.debug("⚠️ Step 19: Calculating sensor values to update coordinator data")
+            if daily_data:
+                try:
+                    sensor_data = await self._calculate_sensor_values(daily_data, monthly_data, manual_data)
+                    _LOGGER.debug("⚠️ Step 20: Sensor values calculated, updating coordinator data")
+                    _LOGGER.debug("⚠️ Step 20a: Sensor data keys: %s", list(sensor_data.keys()) if sensor_data else "none")
+                    
+                    # Update the coordinator's data
+                    self.data = sensor_data
+                    
+                    # Trigger a coordinator update to refresh all sensors
+                    _LOGGER.debug("⚠️ Step 21: Triggering coordinator update to refresh sensors")
+                    self.async_set_updated_data(sensor_data)
+                    _LOGGER.debug("⚠️ Step 22: Sensors updated with new data")
+                    
+                except Exception as e:
+                    _LOGGER.error("⚠️ ERROR calculating/updating sensor values: %s", e, exc_info=True)
+            
+            _LOGGER.debug("⚠️ Step 23: Historical data backfill completed successfully")
+            _LOGGER.warning("⚠️ BACKFILL COMPLETE - Statistics injected AND sensors updated!")
             
         except Exception as e:
             _LOGGER.error("Error during historical data backfill: %s", e, exc_info=True)
