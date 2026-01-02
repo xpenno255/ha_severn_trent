@@ -3,10 +3,16 @@
     "step": {
       "user": {
         "title": "Severn Trent Water",
-        "description": "Enter your Severn Trent account credentials. Your account and meter details will be discovered automatically.",
+        "description": "Enter your Severn Trent account email address. You will receive a magic link email to authenticate.",
         "data": {
-          "email": "Email",
-          "password": "Password"
+          "email": "Email"
+        }
+      },
+      "magic_link": {
+        "title": "Enter Magic Link",
+        "description": "Check your email ({email}) for a magic link from Severn Trent. Paste the full URL or just the token here.",
+        "data": {
+          "magic_link": "Magic Link URL or Token"
         }
       },
       "account_selection": {
@@ -15,16 +21,33 @@
         "data": {
           "account_number": "Account Number"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate",
+        "description": "Your authentication has expired. Click Submit to receive a new magic link at {email}.",
+        "data": {}
+      },
+      "reauth_magic_link": {
+        "title": "Enter Magic Link",
+        "description": "Check your email ({email}) for the new magic link. Paste it here to re-authenticate.",
+        "data": {
+          "magic_link": "Magic Link URL or Token"
+        }
       }
     },
     "error": {
-      "invalid_auth": "Invalid email or password",
+      "invalid_auth": "Authentication failed. The magic link may have expired or is invalid.",
+      "invalid_magic_link": "Invalid magic link format. Please paste the full URL or the 64-character token.",
+      "cannot_send_email": "Failed to send magic link email. Please check your email address and try again.",
       "no_accounts": "No Severn Trent accounts found for this login",
       "cannot_fetch_meters": "Could not fetch meter information. Please contact support.",
       "unknown": "Unexpected error occurred"
     },
     "abort": {
-      "already_configured": "Account is already configured"
+      "already_configured": "Account is already configured",
+      "cannot_fetch_meters": "Could not fetch meter information",
+      "reauth_failed": "Re-authentication failed. Please remove and re-add the integration.",
+      "reauth_successful": "Re-authentication successful!"
     }
   }
 }

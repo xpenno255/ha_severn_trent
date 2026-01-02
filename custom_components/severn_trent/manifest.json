@@ -6,6 +6,6 @@
   "documentation": "https://github.com/xpenno255/ha_severn_trent",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "requirements": [],
-  "version": "1.2.5"
+  "requirements": ["aiohttp>=3.8.0"],
+  "version": "2.0.0"
 }

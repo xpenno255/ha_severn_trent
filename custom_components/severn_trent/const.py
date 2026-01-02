@@ -4,6 +4,27 @@ DOMAIN = "severn_trent"
 
 API_URL = "https://api.st.kraken.tech/v1/graphql/"
 
+# Magic link authentication mutations
+SEND_MAGIC_LINK_MUTATION = """
+mutation SendOneTimeLoginEmail($input: SendOneTimeLoginEmailInput!) {
+  sendOneTimeLoginEmail(input: $input) {
+    status
+  }
+}
+"""
+
+EXCHANGE_TOKEN_MUTATION = """
+mutation LoginWithMagicLinkToken($input: ObtainJSONWebTokenInput!) {
+  obtainKrakenToken(input: $input) {
+    token
+    payload
+    refreshToken
+    refreshExpiresIn
+  }
+}
+"""
+
+# Legacy email/password mutation (kept for reference, no longer works)
 AUTH_MUTATION = """
 mutation ObtainKrakenToken($input: ObtainJSONWebTokenInput!) {
   obtainKrakenToken(input: $input) {

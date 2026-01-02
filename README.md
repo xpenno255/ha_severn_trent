@@ -4,20 +4,24 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 
 ## Features
 
-- **Fully Automatic Setup**: Just enter your email and password - account and meter details are discovered automatically
+- **Magic Link Authentication**: Secure authentication using one-time login links sent to your email
+- **Automatic Token Refresh**: JWT tokens refresh automatically every 15 minutes
+- **Re-authentication Flow**: Seamless re-authentication when tokens expire
 - **Yesterday's Usage**: Track your water consumption from the previous day
 - **7-Day Average**: Monitor your average daily water usage over the past week
 - **Weekly Total**: See your total water consumption for the last 7 days
 - **Meter Reading**: Official cumulative meter readings with historical data and usage between readings
 - **Estimated Current Meter Reading**: Accurate estimate of your current meter position based on official reading + monthly usage
 - **Automatic Updates**: Data refreshes every hour
-- **Native Home Assistant Integration**: Full support for Home Assistant's sensor platform with proper units and device classes
+- **Fully Async**: Non-blocking HTTP calls using aiohttp for optimal Home Assistant performance
+- **Native Integration**: Full support for Home Assistant's sensor platform with proper units and device classes
 
 ## Requirements
 
 - Home Assistant 2025.1 or newer
 - A Severn Trent online account with smart meter
-- Your account email and password
+- Your Severn Trent account email address
+- Access to your email to receive magic link authentication
 
 ## Installation
 
@@ -62,28 +66,48 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 
 ## Configuration
 
-Setup is fully automatic! You only need:
+### Initial Setup
 
-1. **Email**: Your Severn Trent account email
-2. **Password**: Your Severn Trent account password
+The integration uses a **magic link authentication** flow for secure access:
 
-The integration will automatically:
-- Discover your account number(s)
-- Fetch your meter identifiers (Device ID and Market Supply Point ID)
-- Set up all sensors with historical data
+1. **Add the integration** through the Home Assistant UI (Settings → Devices & Services → Add Integration)
+2. **Enter your email**: Provide your Severn Trent account email address
+3. **Check your email**: You'll receive a magic link from Severn Trent
+4. **Paste the magic link**: Copy the entire URL from the email and paste it into Home Assistant
+   - The link looks like: `https://my-account.stwater.co.uk/?key=...`
+   - Or you can paste just the 64-character token
+5. **Select account** (if you have multiple): Choose which Severn Trent account to monitor
+6. **Done**: The integration will automatically discover your meter details and begin fetching data
 
 ### Multiple Accounts
 
-If you have multiple Severn Trent accounts, you'll be prompted to select which one to monitor after entering your credentials.
+If you have multiple Severn Trent accounts, you'll be prompted to select which one to monitor after entering the magic link.
 
-### Setup Process
+### Re-authentication
 
-1. Add the integration through the Home Assistant UI
-2. Enter your email and password
-3. If you have multiple accounts, select the one to monitor
-4. Click Submit
+When your authentication expires (typically after ~30 minutes of inactivity), Home Assistant will:
+1. Display a notification: "Integration requires re-authentication"
+2. Click the notification or go to the integration settings
+3. Click **"Re-authenticate"**
+4. The integration will send a new magic link to your email
+5. Paste the new magic link to restore access
 
-The integration will authenticate and begin fetching your water usage data immediately.
+## How It Works
+
+### Authentication Flow
+
+1. **Magic Link Request**: Integration sends a request to Severn Trent API
+2. **Email Delivery**: You receive an email with a one-time login link
+3. **Token Exchange**: Magic link token is exchanged for a JWT (valid 15 min) + refresh token (valid ~30 min)
+4. **Automatic Refresh**: JWT tokens refresh automatically in the background
+5. **Re-auth on Expiry**: When refresh token expires, you'll be prompted to re-authenticate
+
+### Token Management
+
+- **JWT Token**: Refreshes automatically every 14 minutes (expires after 15 min)
+- **Refresh Token**: Valid for ~30 minutes from authentication
+- **Stored Securely**: Tokens are stored in Home Assistant's encrypted config storage
+- **No Passwords Stored**: Only refresh tokens are stored, never passwords
 
 ## Sensors
 
@@ -147,13 +171,26 @@ This gives you an accurate running total between official 6-monthly readings.
 
 ## Data Sources
 
-The integration uses three data sources:
+The integration uses three data sources from the Severn Trent API:
 
 1. **Smart Meter Hourly Data**: Automated readings taken every hour, aggregated into daily totals for the past 7 days
 2. **Smart Meter Monthly Data**: Monthly usage totals for the past 12 months (includes partial current month)
 3. **Manual Meter Readings**: Official readings taken periodically (typically bi-annually) showing cumulative meter totals
 
 ## Troubleshooting
+
+### Authentication Issues
+
+**Magic link not working:**
+- Check your email spam folder
+- Ensure you're using the full URL from the email
+- Magic links expire quickly - request a new one if needed
+- Try pasting just the 64-character token instead of the full URL
+
+**Re-authentication required:**
+- This is normal after ~30 minutes of inactivity
+- Click the notification and follow the re-authentication flow
+- New magic link will be sent to your email
 
 ### No Data Showing
 
@@ -165,13 +202,6 @@ The integration uses three data sources:
    target:
      entity_id: sensor.severn_trent_yesterday_usage
    ```
-
-### Authentication Errors
-
-If you see "Unauthorized" or authentication errors:
-- Verify your email and password are correct
-- Check that you can log into the Severn Trent website with the same credentials
-- Ensure there are no leading or trailing spaces in your credentials
 
 ### No Accounts Found
 
@@ -197,25 +227,35 @@ Then restart Home Assistant to see detailed logs.
 
 This integration uses the Kraken API platform (developed by Octopus Energy and used by Severn Trent). The API:
 - Uses GraphQL for data queries
-- Requires JWT authentication
+- Requires JWT authentication via magic link
 - Provides hourly, daily, and monthly water usage data from smart meters
 - Provides manual meter readings with historical data
-- Tokens expire after 15 minutes (automatically refreshed)
+- JWT tokens expire after 15 minutes (automatically refreshed)
+- Refresh tokens expire after ~30 minutes (triggers re-authentication)
 
-## Update Frequency
+## Technical Details
 
-By default, the integration updates every hour. To change this, edit `__init__.py`:
+### Architecture
 
-```python
-update_interval=timedelta(hours=1),  # Change to desired interval
-```
+- **Fully Async**: Uses `aiohttp` for all HTTP requests - no blocking operations
+- **Token Management**: Automatic JWT refresh with proper error handling
+- **Config Flow**: Modern Home Assistant config flow with reauth support
+- **Data Coordinator**: Updates every hour using Home Assistant's DataUpdateCoordinator
+- **Error Handling**: Graceful degradation with clear error messages
 
-Recommended intervals:
-- Hourly: `timedelta(hours=1)` (default)
-- Every 6 hours: `timedelta(hours=6)`
-- Daily: `timedelta(days=1)`
+### Update Frequency
 
-Note: Smart meter data has a delay - hourly readings aren't available immediately and yesterday's data is the most recent complete day available.
+By default, the integration updates every hour. Smart meter data has a processing delay, so:
+- Yesterday is the most recent complete day available
+- Today's data is not available due to API limitations
+- Hourly readings are aggregated into daily totals
+
+## Energy Dashboard Integration
+
+The weekly total sensor can be added to Home Assistant's Energy Dashboard:
+1. Go to Settings → Dashboards → Energy
+2. Add Water Consumption
+3. Select `sensor.severn_trent_weekly_total`
 
 ## Data Limitations
 
@@ -231,12 +271,13 @@ Note: Smart meter data has a delay - hourly readings aren't available immediatel
 - Shows cumulative meter total (like an odometer)
 - Historical readings available for usage tracking over time
 
-## Energy Dashboard Integration
+## Privacy & Security
 
-The weekly total sensor can be added to Home Assistant's Energy Dashboard:
-1. Go to Settings → Dashboards → Energy
-2. Add Water Consumption
-3. Select `sensor.severn_trent_weekly_total`
+- **No Passwords Stored**: Only refresh tokens are stored
+- **Encrypted Storage**: Tokens stored in Home Assistant's encrypted config
+- **Magic Link Security**: One-time use links that expire quickly
+- **Local Processing**: All data stays within your Home Assistant instance
+- **No Third-Party Services**: Direct communication with Severn Trent API only
 
 ## Contributing
 
@@ -261,6 +302,14 @@ This is an unofficial integration and is not affiliated with or endorsed by Seve
 For issues, questions, or feature requests, please open an issue on GitHub.
 
 ## Changelog
+
+### v2.0.0 (Major Update)
+- **BREAKING**: Switched to magic link authentication (email/password no longer supported)
+- Fully async implementation using aiohttp
+- Automatic JWT token refresh every 15 minutes
+- Re-authentication flow when tokens expire
+- Improved error handling and logging
+- Better Home Assistant integration practices
 
 ### v1.2.0
 - Added estimated current meter reading sensor
