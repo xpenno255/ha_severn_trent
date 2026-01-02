@@ -1,3 +1,7 @@
+# Due to changes in Severn Trent's Website this integration no longer functions. Please check Issues for more info.
+
+
+
 # Severn Trent Water - Home Assistant Integration
 
 A custom Home Assistant integration for monitoring water usage from Severn Trent smart meters via the Kraken API.
