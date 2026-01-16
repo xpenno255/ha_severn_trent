@@ -7,10 +7,17 @@ from datetime import timedelta
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN
 from .api import SevernTrentAPI
+from .const import (
+    CONF_ACCOUNT_NUMBER,
+    CONF_API_KEY,
+    CONF_DEVICE_ID,
+    CONF_MARKET_SUPPLY_POINT_ID,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -19,14 +26,21 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Severn Trent from a config entry."""
     _LOGGER.info("Setting up Severn Trent integration")
-    _LOGGER.debug("Config entry data: %s", {k: v if k != "password" else "***" for k, v in entry.data.items()})
-    
+    _LOGGER.debug(
+        "Config entry data: %s",
+        {k: ("***" if k == CONF_API_KEY else v) for k, v in entry.data.items()},
+    )
+
+    api_key = entry.data.get(CONF_API_KEY)
+    if not api_key:
+        _LOGGER.error("Missing API key; reauthentication required")
+        raise ConfigEntryAuthFailed("Missing API key")
+
     api = SevernTrentAPI(
-        email=entry.data["email"],
-        password=entry.data["password"],
-        account_number=entry.data["account_number"],
-        market_supply_point_id=entry.data.get("market_supply_point_id"),
-        device_id=entry.data.get("device_id")
+        api_key=api_key,
+        account_number=entry.data[CONF_ACCOUNT_NUMBER],
+        market_supply_point_id=entry.data.get(CONF_MARKET_SUPPLY_POINT_ID),
+        device_id=entry.data.get(CONF_DEVICE_ID),
     )
     
     _LOGGER.info("API object created, attempting authentication")
@@ -34,7 +48,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Authenticate
     if not await hass.async_add_executor_job(api.authenticate):
         _LOGGER.error("Authentication failed during setup")
-        return False
+        raise ConfigEntryAuthFailed("Authentication failed")
     
     _LOGGER.info("Authentication successful during setup")
     

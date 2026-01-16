@@ -9,17 +9,30 @@ from typing import Any
 
 import requests
 
-from .const import API_URL, AUTH_MUTATION, ACCOUNT_LIST_QUERY, METER_IDENTIFIERS_QUERY, METER_READINGS_QUERY, SMART_METER_READINGS_QUERY
+from .const import (
+    API_KEY_MUTATION,
+    API_URL,
+    AUTH_MUTATION,
+    ACCOUNT_LIST_QUERY,
+    METER_IDENTIFIERS_QUERY,
+    METER_READINGS_QUERY,
+    SMART_METER_READINGS_QUERY,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 class SevernTrentAPI:
     """API client for Severn Trent Water."""
     
-    def __init__(self, email: str, password: str, account_number: str = None, market_supply_point_id: str = None, device_id: str = None):
+    def __init__(
+        self,
+        api_key: str | None,
+        account_number: str | None = None,
+        market_supply_point_id: str | None = None,
+        device_id: str | None = None,
+    ):
         """Initialize the API client."""
-        self.email = email
-        self.password = password
+        self.api_key = api_key
         self.account_number = account_number
         self.market_supply_point_id = market_supply_point_id
         self.device_id = device_id
@@ -28,11 +41,56 @@ class SevernTrentAPI:
         self.token_expires_at = 0
         self.session = requests.Session()
         self.meter_identifiers_fetched = False
+
+    @staticmethod
+    def _normalize_browser_token(browser_token: str) -> str:
+        token = browser_token.strip()
+        if token.lower().startswith("bearer "):
+            return token[7:].strip()
+        return token
+
+    @staticmethod
+    def generate_api_key(browser_token: str) -> str | None:
+        """Exchange a temporary browser token for a long-lived API key."""
+        token = SevernTrentAPI._normalize_browser_token(browser_token)
+        if not token:
+            return None
+
+        try:
+            session = requests.Session()
+            response = session.post(
+                API_URL,
+                json={"query": API_KEY_MUTATION},
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": token,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            if "errors" in data:
+                _LOGGER.error("API key generation errors: %s", data["errors"])
+                return None
+
+            key = data.get("data", {}).get("regenerateSecretKey", {}).get("key")
+            if not key:
+                _LOGGER.error("API key missing in response")
+                return None
+
+            return key
+        except Exception as e:
+            _LOGGER.error("API key generation error: %s", e, exc_info=True)
+            return None
     
     def authenticate(self) -> bool:
         """Authenticate with the API and obtain JWT token."""
+        if not self.api_key:
+            _LOGGER.error("Missing API key; cannot authenticate")
+            return False
+
         try:
-            _LOGGER.info("Attempting authentication for %s", self.email)
+            _LOGGER.info("Attempting API key authentication")
             _LOGGER.debug("Account number: %s", self.account_number)
             
             response = self.session.post(
@@ -41,8 +99,7 @@ class SevernTrentAPI:
                     "query": AUTH_MUTATION,
                     "variables": {
                         "input": {
-                            "email": self.email,
-                            "password": self.password
+                            "APIKey": self.api_key
                         }
                     },
                     "operationName": "ObtainKrakenToken"
@@ -78,6 +135,11 @@ class SevernTrentAPI:
         """Fetch list of account numbers for the authenticated user."""
         try:
             _LOGGER.info("Fetching account numbers")
+
+            self._ensure_valid_token()
+            if not self.token:
+                _LOGGER.error("No token available when fetching account numbers")
+                return []
             
             headers = {
                 "Authorization": self.token

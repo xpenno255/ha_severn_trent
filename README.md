@@ -1,12 +1,10 @@
-# Due to changes in Severn Trent's Website this integration no longer functions. Please check Issues for more info.
-
-## Severn Trent Water - Home Assistant Integration
+# Severn Trent Water - Home Assistant Integration
 
 A custom Home Assistant integration for monitoring water usage from Severn Trent smart meters via the Kraken API.
 
 ## Features
 
-- **Fully Automatic Setup**: Just enter your email and password - account and meter details are discovered automatically
+- **Guided Setup**: Paste a temporary browser token to generate an API key, and account/meter details are discovered automatically
 - **Yesterday's Usage**: Track your water consumption from the previous day
 - **7-Day Average**: Monitor your average daily water usage over the past week
 - **Weekly Total**: See your total water consumption for the last 7 days
@@ -19,7 +17,7 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 
 - Home Assistant 2025.1 or newer
 - A Severn Trent online account with smart meter
-- Your account email and password
+- A temporary Authorization token from your Severn Trent browser session
 
 ## Installation
 
@@ -64,10 +62,9 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 
 ## Configuration
 
-Setup is fully automatic! You only need:
+Setup is guided! You only need:
 
-1. **Email**: Your Severn Trent account email
-2. **Password**: Your Severn Trent account password
+1. **Browser Authorization Token**: Temporary token copied from your browser after logging in
 
 The integration will automatically:
 - Discover your account number(s)
@@ -81,11 +78,18 @@ If you have multiple Severn Trent accounts, you'll be prompted to select which o
 ### Setup Process
 
 1. Add the integration through the Home Assistant UI
-2. Enter your email and password
+2. Paste your browser Authorization token
 3. If you have multiple accounts, select the one to monitor
 4. Click Submit
 
 The integration will authenticate and begin fetching your water usage data immediately.
+
+### Getting the Browser Authorization Token
+
+1. Log in to the Severn Trent website in your browser
+2. Open Developer Tools → Network and find a request to `https://api.st.kraken.tech/v1/graphql/`
+3. Copy the `Authorization` header value from that request
+4. Paste it into the integration setup form
 
 ## Sensors
 
@@ -170,10 +174,10 @@ The integration uses three data sources:
 
 ### Authentication Errors
 
-If you see "Unauthorized" or authentication errors:
-- Verify your email and password are correct
-- Check that you can log into the Severn Trent website with the same credentials
-- Ensure there are no leading or trailing spaces in your credentials
+If you see authentication errors:
+- Ensure the browser token is fresh (it can expire quickly)
+- Reopen the Severn Trent website, log in again, and copy a new `Authorization` token
+- Make sure you pasted the raw token value (no extra whitespace)
 
 ### No Accounts Found
 
@@ -263,6 +267,10 @@ This is an unofficial integration and is not affiliated with or endorsed by Seve
 For issues, questions, or feature requests, please open an issue on GitHub.
 
 ## Changelog
+
+### v1.3.0
+- Switched authentication to a browser token -> API key flow
+- Added reauthentication support for refreshing the API key
 
 ### v1.2.0
 - Added estimated current meter reading sensor
