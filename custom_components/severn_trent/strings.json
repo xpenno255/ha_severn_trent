@@ -3,10 +3,9 @@
     "step": {
       "user": {
         "title": "Severn Trent Water",
-        "description": "Enter your Severn Trent account credentials. Your account and meter details will be discovered automatically.",
+        "description": "Paste the temporary Authorization token from your Severn Trent browser session to generate a permanent API key. Your account and meter details will be discovered automatically.",
         "data": {
-          "email": "Email",
-          "password": "Password"
+          "browser_token": "Browser Authorization Token"
         }
       },
       "account_selection": {
@@ -15,16 +14,25 @@
         "data": {
           "account_number": "Account Number"
         }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Severn Trent",
+        "description": "Paste a fresh browser Authorization token to generate a new API key.",
+        "data": {
+          "browser_token": "Browser Authorization Token"
+        }
       }
     },
     "error": {
-      "invalid_auth": "Invalid email or password",
+      "invalid_auth": "Unable to authenticate with the API key",
+      "cannot_generate_api_key": "Could not generate an API key from the browser token",
       "no_accounts": "No Severn Trent accounts found for this login",
       "cannot_fetch_meters": "Could not fetch meter information. Please contact support.",
       "unknown": "Unexpected error occurred"
     },
     "abort": {
-      "already_configured": "Account is already configured"
+      "already_configured": "Account is already configured",
+      "reauth_successful": "Reauthentication was successful"
     }
   }
 }

@@ -4,6 +4,12 @@ DOMAIN = "severn_trent"
 
 API_URL = "https://api.st.kraken.tech/v1/graphql/"
 
+CONF_API_KEY = "api_key"
+CONF_BROWSER_TOKEN = "browser_token"
+CONF_ACCOUNT_NUMBER = "account_number"
+CONF_MARKET_SUPPLY_POINT_ID = "market_supply_point_id"
+CONF_DEVICE_ID = "device_id"
+
 AUTH_MUTATION = """
 mutation ObtainKrakenToken($input: ObtainJSONWebTokenInput!) {
   obtainKrakenToken(input: $input) {
@@ -11,6 +17,14 @@ mutation ObtainKrakenToken($input: ObtainJSONWebTokenInput!) {
     payload
     refreshToken
     refreshExpiresIn
+  }
+}
+"""
+
+API_KEY_MUTATION = """
+mutation CreateAPIKey {
+  regenerateSecretKey {
+    key
   }
 }
 """
