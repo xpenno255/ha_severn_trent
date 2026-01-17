@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - When official reading is on 1st of month: compares monthly start dates against the official reading date (not month boundary)
   - When official reading is mid-month: excludes that month (partial month covered by daily data)
   - Prevents including historical months before the official reading
-  - Resolves issue where estimated reading was too high (was including 8 months instead of 4)
+  - Added deduplication of monthly readings (API returns duplicate entries per month)
+  - Now keeps only the last/most accurate reading for each month
+  - Resolves issue where estimated reading was too high (was including 8 duplicate entries instead of 4 unique months)
   - For Oct 1st, 2025 official reading: now correctly includes only Oct, Nov, Dec 2025, Jan 2026 (4 periods)
 - **Fix**: Removed invalid state class from Daily Average sensor
   - Removed `MEASUREMENT` state class which is incompatible with `WATER` device class
