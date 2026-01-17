@@ -13,6 +13,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfVolume
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -22,6 +23,40 @@ from homeassistant.helpers.update_coordinator import (
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+class SevernTrentBaseSensor(CoordinatorEntity, SensorEntity):
+    """Base sensor with device info."""
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator,
+        account_number: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._account_number = account_number
+
+    def _meter_id(self) -> str | None:
+        if not self.coordinator.data:
+            return None
+
+        smart_meter = self.coordinator.data.get("smart_meter", {}) or {}
+        manual_meter = self.coordinator.data.get("manual_meter", {}) or {}
+        return smart_meter.get("meter_id") or manual_meter.get("meter_id")
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        meter_id = self._meter_id()
+        name = f"Severn Trent Water ({self._account_number})"
+        info = DeviceInfo(
+            identifiers={(DOMAIN, self._account_number)},
+            name=name,
+            manufacturer="Severn Trent",
+            model="Water Meter",
+        )
+        if meter_id:
+            info["serial_number"] = meter_id
+        return info
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -43,7 +78,7 @@ async def async_setup_entry(
 
     async_add_entities(sensors)
 
-class SevernTrentYesterdayUsageSensor(CoordinatorEntity, SensorEntity):
+class SevernTrentYesterdayUsageSensor(SevernTrentBaseSensor):
     """Sensor for yesterday's water usage."""
 
     _attr_device_class = SensorDeviceClass.WATER
@@ -57,8 +92,7 @@ class SevernTrentYesterdayUsageSensor(CoordinatorEntity, SensorEntity):
         account_number: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._account_number = account_number
+        super().__init__(coordinator, account_number)
         self._attr_name = "Severn Trent Yesterday Usage"
         self._attr_unique_id = f"{account_number}_yesterday_usage"
 
@@ -80,7 +114,7 @@ class SevernTrentYesterdayUsageSensor(CoordinatorEntity, SensorEntity):
             "meter_id": self.coordinator.data["smart_meter"].get("meter_id"),
         }
 
-class SevernTrentAverageDailyUsageSensor(CoordinatorEntity, SensorEntity):
+class SevernTrentAverageDailyUsageSensor(SevernTrentBaseSensor):
     """Sensor for average daily water usage over the last 7 days."""
 
     _attr_device_class = SensorDeviceClass.WATER
@@ -92,8 +126,7 @@ class SevernTrentAverageDailyUsageSensor(CoordinatorEntity, SensorEntity):
         account_number: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._account_number = account_number
+        super().__init__(coordinator, account_number)
         self._attr_name = "Severn Trent Daily Average"
         self._attr_unique_id = f"{account_number}_daily_average"
 
@@ -123,7 +156,7 @@ class SevernTrentAverageDailyUsageSensor(CoordinatorEntity, SensorEntity):
             "period": "7 days",
         }
 
-class SevernTrentWeekToDateSensor(CoordinatorEntity, SensorEntity):
+class SevernTrentWeekToDateSensor(SevernTrentBaseSensor):
     """Sensor for water usage from Monday to present in current week."""
 
     _attr_device_class = SensorDeviceClass.WATER
@@ -137,8 +170,7 @@ class SevernTrentWeekToDateSensor(CoordinatorEntity, SensorEntity):
         account_number: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._account_number = account_number
+        super().__init__(coordinator, account_number)
         self._attr_name = "Severn Trent Week to Date"
         self._attr_unique_id = f"{account_number}_week_to_date"
 
@@ -201,7 +233,7 @@ class SevernTrentPreviousWeekSensor(CoordinatorEntity, SensorEntity):
             "days_in_week": 7,
         }
 
-class SevernTrentMeterReadingSensor(CoordinatorEntity, SensorEntity):
+class SevernTrentMeterReadingSensor(SevernTrentBaseSensor):
     """Sensor for manual meter reading (cumulative total)."""
 
     _attr_device_class = SensorDeviceClass.WATER
@@ -215,8 +247,7 @@ class SevernTrentMeterReadingSensor(CoordinatorEntity, SensorEntity):
         account_number: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._account_number = account_number
+        super().__init__(coordinator, account_number)
         self._attr_name = "Severn Trent Meter Reading"
         self._attr_unique_id = f"{account_number}_meter_reading"
 
@@ -252,7 +283,7 @@ class SevernTrentMeterReadingSensor(CoordinatorEntity, SensorEntity):
         
         return attrs
 
-class SevernTrentEstimatedMeterReadingSensor(CoordinatorEntity, SensorEntity):
+class SevernTrentEstimatedMeterReadingSensor(SevernTrentBaseSensor):
     """Sensor for estimated current meter reading based on official reading + daily usage."""
 
     _attr_device_class = SensorDeviceClass.WATER
@@ -266,8 +297,7 @@ class SevernTrentEstimatedMeterReadingSensor(CoordinatorEntity, SensorEntity):
         account_number: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._account_number = account_number
+        super().__init__(coordinator, account_number)
         self._attr_name = "Severn Trent Estimated Meter Reading"
         self._attr_unique_id = f"{account_number}_estimated_meter_reading"
 
