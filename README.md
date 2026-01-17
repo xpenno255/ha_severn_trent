@@ -7,9 +7,10 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 - **Guided Setup**: Paste a temporary browser token to generate an API key, and account/meter details are discovered automatically
 - **Yesterday's Usage**: Track your water consumption from the previous day
 - **7-Day Average**: Monitor your average daily water usage over the past week
-- **Weekly Total**: See your total water consumption for the last 7 days
+- **Week to Date**: See your water consumption from Monday to present in the current week
+- **Previous Week**: View your total water consumption for the previous week (Monday-Sunday)
 - **Meter Reading**: Official cumulative meter readings with historical data and usage between readings
-- **Estimated Current Meter Reading**: Accurate estimate of your current meter position based on official reading + monthly usage
+- **Estimated Current Meter Reading**: Accurate estimate of your current meter position based on official reading + daily/monthly usage
 - **Automatic Updates**: Data refreshes every hour
 - **Native Home Assistant Integration**: Full support for Home Assistant's sensor platform with proper units and device classes
 
@@ -93,13 +94,14 @@ The integration will authenticate and begin fetching your water usage data immed
 
 ## Sensors
 
-The integration creates five sensors:
+The integration creates six sensors:
 
 | Sensor | Description | Unit |
 |--------|-------------|------|
 | `sensor.severn_trent_yesterday_usage` | Water consumed yesterday | m³ |
-| `sensor.severn_trent_daily_average` | Average daily usage over 7 days | m³/d |
-| `sensor.severn_trent_weekly_total` | Total usage over 7 days | m³ |
+| `sensor.severn_trent_daily_average` | Average daily usage over 7 days | m³ |
+| `sensor.severn_trent_week_to_date` | Water consumed this week (Mon-present) | m³ |
+| `sensor.severn_trent_previous_week` | Water consumed last week (Mon-Sun) | m³ |
 | `sensor.severn_trent_meter_reading` | Official cumulative meter reading | m³ |
 | `sensor.severn_trent_estimated_meter_reading` | Estimated current meter reading | m³ |
 
@@ -115,9 +117,14 @@ Each sensor includes additional attributes:
 - Recent daily readings (last 7 days)
 - Period information
 
-**Weekly Total:**
-- Period
-- Number of days included
+**Week to Date:**
+- Week start date (Monday)
+- Number of days in current week so far
+
+**Previous Week:**
+- Week start date (Monday)
+- Week end date (Sunday)
+- Number of days in week (always 7)
 
 **Meter Reading:**
 - Reading date
@@ -132,7 +139,8 @@ Each sensor includes additional attributes:
 - Last official reading and date
 - Usage accumulated since official reading
 - Days since official reading
-- Number of monthly periods included
+- Number of daily periods included (partial month)
+- Number of monthly periods included (complete months)
 - Estimation note
 
 ## How the Estimated Meter Reading Works
@@ -140,14 +148,22 @@ Each sensor includes additional attributes:
 The estimated meter reading provides an accurate prediction of your current meter position:
 
 1. Starts with your last official meter reading (taken every ~6 months by Severn Trent)
-2. Adds monthly usage totals from your smart meter since that date
-3. Includes partial data for the current incomplete month
+2. If the official reading was taken mid-month, adds daily usage totals from that date to the end of that month
+3. Adds monthly usage totals for all complete months after the official reading month
+4. This approach prevents double-counting while minimizing API calls
 
-**Example:**
-- Official reading: 272 m³ (October 1st, 2025)
-- September usage: 9.841 m³
-- October usage so far: 0.831 m³
-- Estimated current reading: 272 + 9.841 + 0.831 = 282.672 m³
+**Example (mid-month reading):**
+- Official reading: 272 m³ (October 15th, 2024)
+- Daily usage Oct 15-31: 2.5 m³ (partial month - uses daily data)
+- November usage: 9.2 m³ (complete month - uses monthly data)
+- December usage: 8.8 m³ (complete month - uses monthly data)
+- Estimated current reading: 272 + 2.5 + 9.2 + 8.8 = 292.5 m³
+
+**Example (1st of month reading):**
+- Official reading: 272 m³ (October 1st, 2024)
+- October usage: 9.5 m³ (complete month - uses monthly data)
+- November usage: 9.2 m³ (complete month - uses monthly data)
+- Estimated current reading: 272 + 9.5 + 9.2 = 290.7 m³
 
 This gives you an accurate running total between official 6-monthly readings.
 
@@ -239,10 +255,10 @@ Note: Smart meter data has a delay - hourly readings aren't available immediatel
 
 ## Energy Dashboard Integration
 
-The weekly total sensor can be added to Home Assistant's Energy Dashboard:
+The water consumption sensors can be added to Home Assistant's Energy Dashboard:
 1. Go to Settings → Dashboards → Energy
 2. Add Water Consumption
-3. Select `sensor.severn_trent_weekly_total`
+3. Select `sensor.severn_trent_week_to_date` or `sensor.severn_trent_previous_week`
 
 ## Contributing
 
@@ -267,6 +283,23 @@ This is an unofficial integration and is not affiliated with or endorsed by Seve
 For issues, questions, or feature requests, please open an issue on GitHub.
 
 ## Changelog
+
+### v1.4.1
+- **Critical Fix**: Previous week sensor now shows correct values
+  - Fixed data fetching to cover complete previous week
+  - Resolves issue where weekly usage was underreported
+
+### v1.4.0
+- **Breaking Change**: Replaced "Weekly Total" sensor with "Week to Date" (Monday-present)
+- Added new "Previous Week" sensor (Monday-Sunday of last week)
+- Fixed state classes for proper Home Assistant statistics integration
+- Improved estimated meter reading calculation to prevent double-counting
+  - Uses daily data for partial months when official reading is mid-month
+  - Uses monthly data only for complete months after official reading
+- Enhanced date comparison logic (proper datetime vs string comparison)
+- Added device classes to all water consumption sensors
+- Improved error handling and validation logging
+- All sensors now properly support Home Assistant Energy Dashboard
 
 ### v1.3.0
 - Switched authentication to a browser token -> API key flow
