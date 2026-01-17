@@ -432,8 +432,8 @@ class SevernTrentAPI:
             num_days = len(all_readings)
             avg_daily_usage = total_usage / num_days if num_days > 0 else 0
             
-            # Process monthly data
-            monthly_readings = []
+            # Process monthly data - deduplicate by month (API returns duplicates)
+            monthly_data_dict = {}  # Use dict to deduplicate by year-month
             for measurement in monthly_measurements:
                 node = measurement["node"]
                 try:
@@ -445,15 +445,22 @@ class SevernTrentAPI:
                 start_at = node.get("startAt")
 
                 if start_at:
-                    # Extract year-month
+                    # Extract full date and year-month for grouping
                     date_str = start_at.split("T")[0]
-                    monthly_readings.append({
+                    year_month = date_str[:7]  # Extract YYYY-MM
+
+                    # Keep the last (most recent/accurate) reading for each month
+                    # Store both the grouping key and full date
+                    monthly_data_dict[year_month] = {
                         "value": round(value, 3),
                         "start_date": date_str,
                         "unit": "m³"
-                    })
+                    }
 
-            _LOGGER.info("Found %d monthly readings", len(monthly_readings))
+            # Convert dict back to list, sorted by date
+            monthly_readings = sorted(monthly_data_dict.values(), key=lambda x: x["start_date"])
+
+            _LOGGER.info("Found %d monthly readings (after deduplication)", len(monthly_readings))
 
             # Fetch daily readings since official meter reading if mid-month
             daily_readings_since_official = []
