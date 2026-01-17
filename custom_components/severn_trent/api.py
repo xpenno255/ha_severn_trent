@@ -246,40 +246,54 @@ class SevernTrentAPI:
             _LOGGER.error("Error fetching meter identifiers: %s", e, exc_info=True)
             return False
     
-    def get_meter_readings(self) -> dict[str, Any]:
-        """Get meter readings from the API."""
+    def get_meter_readings(self, official_reading_date: str | None = None) -> dict[str, Any]:
+        """Get meter readings from the API.
+
+        Args:
+            official_reading_date: Optional date of last official meter reading.
+                                   If provided and mid-month, fetches daily data from that date.
+        """
         # Re-authenticate to ensure fresh token
         if not self.authenticate():
             _LOGGER.error("Failed to authenticate before fetching readings")
             return {}
-        
+
         # Fetch meter identifiers if not already done
         if not self._fetch_meter_identifiers():
             _LOGGER.error("Failed to fetch meter identifiers")
             return {}
-        
+
         if not self.token:
             _LOGGER.error("No token available after authentication!")
             return {}
-        
+
         _LOGGER.debug("Using token: %s... (length: %d)", self.token[:30], len(self.token))
-        
+
         if not self.market_supply_point_id or not self.device_id:
             _LOGGER.error("Missing marketSupplyPointId or deviceId")
             return {}
         
         try:
-            # Get yesterday's data (since today's data isn't available yet)
+            # Get data for current week and previous complete week
+            # Need to fetch enough to cover: yesterday, 7-day average, current week, AND previous week
             end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            start_date = end_date - timedelta(days=7)  # Get last 7 days for daily data
-            
-            _LOGGER.info("Fetching daily readings from %s to %s", start_date, end_date)
+
+            # Calculate how many days back to the start of previous week (Monday)
+            today = datetime.now().date()
+            days_since_monday = today.weekday()  # 0 = Monday, 6 = Sunday
+            current_week_monday = today - timedelta(days=days_since_monday)
+            previous_week_monday = current_week_monday - timedelta(days=7)
+
+            # Fetch from previous Monday (14 days back minimum) to ensure we have all data
+            start_date = datetime.combine(previous_week_monday, datetime.min.time())
+
+            _LOGGER.info("Fetching daily readings from %s to %s (covers current + previous week)", start_date, end_date)
             
             headers = {
                 "Authorization": self.token
             }
             
-            # Fetch daily readings (last 7 days)
+            # Fetch daily readings using DAY_INTERVAL (matches website behavior)
             daily_response = self.session.post(
                 API_URL,
                 headers=headers,
@@ -291,7 +305,7 @@ class SevernTrentAPI:
                         "endAt": end_date.isoformat() + "Z",
                         "utilityFilters": [{
                             "waterFilters": {
-                                "readingFrequencyType": "HOUR_INTERVAL",
+                                "readingFrequencyType": "DAY_INTERVAL",
                                 "marketSupplyPointId": self.market_supply_point_id,
                                 "deviceId": self.device_id
                             }
@@ -362,41 +376,44 @@ class SevernTrentAPI:
                 return {}
             
             measurements = properties[0].get("measurements", {}).get("edges", [])
-            _LOGGER.info("Found %d hourly measurements", len(measurements))
-            
+            _LOGGER.info("Found %d daily measurements", len(measurements))
+
             if not measurements:
                 _LOGGER.warning("No measurements found")
                 return {}
-            
-            # Group hourly measurements by day
+
+            # Process daily measurements (already aggregated by API)
             daily_totals = {}
             for measurement in measurements:
                 node = measurement["node"]
                 try:
                     value = float(node["value"])
-                except (ValueError, TypeError):
+                except (ValueError, TypeError) as e:
+                    _LOGGER.warning("Invalid measurement value, using 0.0: %s", e)
                     value = 0.0
-                    
+
                 start_at = node.get("startAt")
-                
+
                 if start_at:
                     date_str = start_at.split("T")[0]
-                    if date_str not in daily_totals:
-                        daily_totals[date_str] = 0
-                    daily_totals[date_str] += value
-            
+                    daily_totals[date_str] = value
+
             _LOGGER.debug("Daily totals: %s", daily_totals)
-            
+
             # Sort days by date (most recent first)
             sorted_days = sorted(daily_totals.items(), key=lambda x: x[0], reverse=True)
-            
+
             if not sorted_days:
                 _LOGGER.warning("No daily totals calculated")
                 return {}
-            
-            # Get yesterday's total (most recent complete day)
-            yesterday_date, yesterday_total = sorted_days[0]
-            
+
+            # Calculate yesterday's date (today - 1 day) to match website behavior
+            yesterday = (datetime.now().date() - timedelta(days=1)).isoformat()
+
+            # Get yesterday's total from the specific date
+            yesterday_total = daily_totals.get(yesterday, 0.0)
+            yesterday_date = yesterday
+
             _LOGGER.info("Yesterday (%s): %s m³", yesterday_date, yesterday_total)
             
             # Calculate running total and build readings list
@@ -421,11 +438,12 @@ class SevernTrentAPI:
                 node = measurement["node"]
                 try:
                     value = float(node["value"])
-                except (ValueError, TypeError):
+                except (ValueError, TypeError) as e:
+                    _LOGGER.warning("Invalid monthly measurement value, using 0.0: %s", e)
                     value = 0.0
-                
+
                 start_at = node.get("startAt")
-                
+
                 if start_at:
                     # Extract year-month
                     date_str = start_at.split("T")[0]
@@ -434,8 +452,126 @@ class SevernTrentAPI:
                         "start_date": date_str,
                         "unit": "m³"
                     })
-            
+
             _LOGGER.info("Found %d monthly readings", len(monthly_readings))
+
+            # Fetch daily readings since official meter reading if mid-month
+            daily_readings_since_official = []
+            if official_reading_date:
+                try:
+                    official_date_str = official_reading_date.split("T")[0] if "T" in official_reading_date else official_reading_date
+                    official_dt = datetime.fromisoformat(official_date_str)
+                    official_month_start = official_dt.replace(day=1)
+
+                    # Check if official reading is mid-month (not on the 1st)
+                    if official_dt.day > 1:
+                        _LOGGER.info("Official reading is mid-month (%s), fetching daily data from that date", official_date_str)
+
+                        # Fetch daily data from official reading date to end of that month
+                        # We need to determine the end of the month
+                        if official_dt.month == 12:
+                            next_month = official_dt.replace(year=official_dt.year + 1, month=1, day=1)
+                        else:
+                            next_month = official_dt.replace(month=official_dt.month + 1, day=1)
+
+                        partial_month_end = next_month  # First day of next month
+
+                        _LOGGER.info("Fetching partial month daily readings from %s to %s", official_date_str, partial_month_end.isoformat())
+
+                        partial_response = self.session.post(
+                            API_URL,
+                            headers=headers,
+                            json={
+                                "query": SMART_METER_READINGS_QUERY,
+                                "variables": {
+                                    "accountNumber": self.account_number,
+                                    "startAt": official_dt.isoformat() + "Z",
+                                    "endAt": partial_month_end.isoformat() + "Z",
+                                    "utilityFilters": [{
+                                        "waterFilters": {
+                                            "readingFrequencyType": "DAY_INTERVAL",
+                                            "marketSupplyPointId": self.market_supply_point_id,
+                                            "deviceId": self.device_id
+                                        }
+                                    }]
+                                },
+                                "operationName": "SmartMeterReadings"
+                            }
+                        )
+
+                        partial_response.raise_for_status()
+                        partial_data = partial_response.json()
+
+                        if "errors" not in partial_data:
+                            partial_properties = partial_data.get("data", {}).get("account", {}).get("properties", [])
+                            if partial_properties:
+                                partial_measurements = partial_properties[0].get("measurements", {}).get("edges", [])
+                                for measurement in partial_measurements:
+                                    node = measurement["node"]
+                                    try:
+                                        value = float(node["value"])
+                                    except (ValueError, TypeError) as e:
+                                        _LOGGER.warning("Invalid partial month measurement value, using 0.0: %s", e)
+                                        value = 0.0
+
+                                    start_at = node.get("startAt")
+                                    if start_at:
+                                        date_str = start_at.split("T")[0]
+                                        daily_readings_since_official.append({
+                                            "value": round(value, 3),
+                                            "date": date_str,
+                                            "unit": "m³"
+                                        })
+
+                                _LOGGER.info("Found %d daily readings for partial month", len(daily_readings_since_official))
+                        else:
+                            _LOGGER.warning("Errors fetching partial month data: %s", partial_data["errors"])
+
+                except (ValueError, AttributeError) as e:
+                    _LOGGER.error("Error processing official reading date: %s - %s", official_reading_date, e)
+
+            # Calculate week-to-date and previous week usage
+            week_to_date_usage = 0
+            previous_week_usage = 0
+            week_start_date = None
+            previous_week_start_date = None
+            previous_week_end_date = None
+            days_in_current_week = 0
+
+            today = datetime.now().date()
+            # Get Monday of current week (weekday() returns 0 for Monday)
+            days_since_monday = today.weekday()
+            current_week_monday = today - timedelta(days=days_since_monday)
+            previous_week_monday = current_week_monday - timedelta(days=7)
+            previous_week_sunday = current_week_monday - timedelta(days=1)
+
+            week_start_date = current_week_monday.isoformat()
+            previous_week_start_date = previous_week_monday.isoformat()
+            previous_week_end_date = previous_week_sunday.isoformat()
+
+            _LOGGER.debug("Current week starts: %s", week_start_date)
+            _LOGGER.debug("Previous week: %s to %s", previous_week_start_date, previous_week_end_date)
+
+            for date_str, daily_total in daily_totals.items():
+                try:
+                    reading_date = datetime.fromisoformat(date_str).date()
+
+                    # Current week (Monday to today)
+                    if current_week_monday <= reading_date <= today:
+                        week_to_date_usage += daily_total
+                        days_in_current_week += 1
+                        _LOGGER.debug("  %s: %s m³ (current week)", date_str, daily_total)
+
+                    # Previous week (Monday to Sunday)
+                    elif previous_week_monday <= reading_date <= previous_week_sunday:
+                        previous_week_usage += daily_total
+                        _LOGGER.debug("  %s: %s m³ (previous week)", date_str, daily_total)
+                except (ValueError, AttributeError) as e:
+                    _LOGGER.warning("Invalid date format for week calculation: %s - %s", date_str, e)
+                    continue
+
+            _LOGGER.info("Week to date usage: %s m³ (%d days)", week_to_date_usage, days_in_current_week)
+            _LOGGER.info("Previous week usage: %s m³", previous_week_usage)
             
             return {
                 "meter_id": f"{self.market_supply_point_id}_{self.device_id}",
@@ -443,9 +579,16 @@ class SevernTrentAPI:
                 "yesterday_date": yesterday_date,
                 "daily_average": round(avg_daily_usage, 3),
                 "total_7day_usage": round(total_usage, 3),
+                "week_to_date_usage": round(week_to_date_usage, 3),
+                "previous_week_usage": round(previous_week_usage, 3),
+                "week_start_date": week_start_date,
+                "previous_week_start_date": previous_week_start_date,
+                "previous_week_end_date": previous_week_end_date,
+                "days_in_current_week": days_in_current_week,
                 "unit": "m³",
                 "all_readings": all_readings,
-                "monthly_readings": monthly_readings
+                "monthly_readings": monthly_readings,
+                "daily_readings_since_official": daily_readings_since_official
             }
             
         except requests.exceptions.HTTPError as e:

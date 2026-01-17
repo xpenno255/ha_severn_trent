@@ -55,13 +55,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def async_update_data():
         """Fetch data from API."""
         try:
-            # Fetch both smart meter and manual readings
-            smart_data = await hass.async_add_executor_job(api.get_meter_readings)
+            # Fetch manual readings first to get official reading date
             manual_data = await hass.async_add_executor_job(api.get_manual_meter_readings)
-            
+
+            # Get official reading date for smart meter data fetching
+            official_reading_date = None
+            if manual_data:
+                official_reading_date = manual_data.get("reading_date")
+
+            # Fetch smart meter readings with official date for partial month handling
+            smart_data = await hass.async_add_executor_job(
+                api.get_meter_readings, official_reading_date
+            )
+
             if not smart_data and not manual_data:
                 _LOGGER.warning("No data returned from API")
-            
+
             # Combine both datasets
             return {
                 "smart_meter": smart_data,
