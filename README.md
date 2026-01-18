@@ -284,6 +284,9 @@ For issues, questions, or feature requests, please open an issue on GitHub.
 
 ## Changelog
 
+### v1.5.0
+-- Thanks to @RobXYZ the sensors are now part of a meter device.
+
 ### v1.4.1
 - **Critical Fix**: Previous week sensor now shows correct values
   - Fixed data fetching to cover complete previous week
