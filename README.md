@@ -87,10 +87,7 @@ The integration will authenticate and begin fetching your water usage data immed
 
 ### Getting the Browser Authorization Token
 
-1. Log in to the Severn Trent website in your browser
-2. Open Developer Tools → Network and find a request to `https://api.st.kraken.tech/v1/graphql/`
-3. Copy the `Authorization` header value from that request
-4. Paste it into the integration setup form
+See the [Token Retrieval Guide](docs/token_retrieval.md) for detailed instructions with screenshots.
 
 ## Sensors
 
