@@ -194,7 +194,7 @@ class SevernTrentWeekToDateSensor(SevernTrentBaseSensor):
         }
 
 
-class SevernTrentPreviousWeekSensor(CoordinatorEntity, SensorEntity):
+class SevernTrentPreviousWeekSensor(SevernTrentBaseSensor):
     """Sensor for water usage for the previous week (Monday-Sunday)."""
 
     _attr_device_class = SensorDeviceClass.WATER
@@ -208,8 +208,7 @@ class SevernTrentPreviousWeekSensor(CoordinatorEntity, SensorEntity):
         account_number: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._account_number = account_number
+        super().__init__(coordinator, account_number)
         self._attr_name = "Severn Trent Previous Week"
         self._attr_unique_id = f"{account_number}_previous_week"
 
