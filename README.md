@@ -281,6 +281,9 @@ For issues, questions, or feature requests, please open an issue on GitHub.
 
 ## Changelog
 
+### v1.5.1
+-- Update user docs to help explain the authenticaiton tocken retrival process
+
 ### v1.5.0
 -- Thanks to @RobXYZ the sensors are now part of a meter device.
 
