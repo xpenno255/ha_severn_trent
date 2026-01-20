@@ -281,6 +281,9 @@ For issues, questions, or feature requests, please open an issue on GitHub.
 
 ## Changelog
 
+### v1.5.2
+-- bump version to fix an issue with home asisstant
+
 ### v1.5.1
 -- Update user docs to help explain the authenticaiton tocken retrival process
 
