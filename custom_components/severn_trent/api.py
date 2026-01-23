@@ -14,8 +14,15 @@ from .const import (
     API_URL,
     AUTH_MUTATION,
     ACCOUNT_LIST_QUERY,
+    BALANCE_QUERY,
     METER_IDENTIFIERS_QUERY,
+    METER_DETAILS_QUERY,
     METER_READINGS_QUERY,
+    PAYMENT_SCHEDULE_QUERY,
+    OUTSTANDING_PAYMENT_QUERY,
+    RATE_LIMIT_QUERY,
+    LEDGERS_QUERY,
+    PAYMENT_FORECAST_QUERY,
     SMART_METER_READINGS_QUERY,
 )
 
@@ -30,12 +37,14 @@ class SevernTrentAPI:
         account_number: str | None = None,
         market_supply_point_id: str | None = None,
         device_id: str | None = None,
+        capability_type: str | None = None,
     ):
         """Initialize the API client."""
         self.api_key = api_key
         self.account_number = account_number
         self.market_supply_point_id = market_supply_point_id
         self.device_id = device_id
+        self.capability_type = capability_type
         self.token = None
         self.refresh_token = None
         self.token_expires_at = 0
@@ -180,7 +189,9 @@ class SevernTrentAPI:
         if self.meter_identifiers_fetched:
             return True
             
-        if self.market_supply_point_id and self.device_id:
+        # Treat identifiers as already available only if we also have the capability.
+        # Existing installs may have stored MSPID/device_id but not capability_type.
+        if self.market_supply_point_id and self.device_id and self.capability_type:
             _LOGGER.debug("Meter identifiers already provided")
             self.meter_identifiers_fetched = True
             return True
@@ -232,6 +243,7 @@ class SevernTrentAPI:
             meter = meters[0]
             self.market_supply_point_id = meter.get("meterPointReference")
             self.device_id = meter.get("serialNumber")
+            self.capability_type = meter.get("capabilityType")
             
             if not self.market_supply_point_id or not self.device_id:
                 _LOGGER.error("Failed to extract meter identifiers from response")
@@ -274,6 +286,17 @@ class SevernTrentAPI:
             return {}
         
         try:
+            def _extract_measurements(payload: dict[str, Any]) -> list[dict[str, Any]] | None:
+                """Extract measurements edge list from a SmartMeterReadings response."""
+                if "data" not in payload or "account" not in payload["data"]:
+                    return None
+                if payload["data"]["account"] is None:
+                    return None
+                props = payload["data"]["account"].get("properties", [])
+                if not props:
+                    return []
+                return props[0].get("measurements", {}).get("edges", [])
+
             # Get data for current week and previous complete week
             # Need to fetch enough to cover: yesterday, 7-day average, current week, AND previous week
             end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -321,6 +344,51 @@ class SevernTrentAPI:
             if "errors" in daily_data:
                 _LOGGER.error("GraphQL errors fetching daily data: %s", daily_data["errors"])
                 return {}
+
+            measurements = _extract_measurements(daily_data)
+            if measurements is None:
+                _LOGGER.error("Unexpected daily readings response structure")
+                _LOGGER.debug("Daily readings response keys: %s", list(daily_data.keys()))
+                return {}
+
+            # Some accounts/meters appear to return 0 edges for DAY_INTERVAL; try an alternate enum.
+            if not measurements:
+                _LOGGER.warning(
+                    "No daily measurements returned for DAY_INTERVAL; retrying with readingFrequencyType=DAY"
+                )
+                daily_retry = self.session.post(
+                    API_URL,
+                    headers=headers,
+                    json={
+                        "query": SMART_METER_READINGS_QUERY,
+                        "variables": {
+                            "accountNumber": self.account_number,
+                            "startAt": start_date.isoformat() + "Z",
+                            "endAt": end_date.isoformat() + "Z",
+                            "utilityFilters": [
+                                {
+                                    "waterFilters": {
+                                        "readingFrequencyType": "DAY",
+                                        "marketSupplyPointId": self.market_supply_point_id,
+                                        "deviceId": self.device_id,
+                                    }
+                                }
+                            ],
+                        },
+                        "operationName": "SmartMeterReadings",
+                    },
+                )
+                daily_retry.raise_for_status()
+                daily_data = daily_retry.json()
+                if "errors" in daily_data:
+                    _LOGGER.error(
+                        "GraphQL errors fetching daily data (retry): %s",
+                        daily_data["errors"],
+                    )
+                else:
+                    retry_measurements = _extract_measurements(daily_data)
+                    if retry_measurements is not None:
+                        measurements = retry_measurements
             
             # Fetch monthly readings (last 12 months for estimation calculations)
             monthly_start = end_date - timedelta(days=365)
@@ -360,27 +428,52 @@ class SevernTrentAPI:
                     monthly_measurements = monthly_properties[0].get("measurements", {}).get("edges", [])
                 else:
                     monthly_measurements = []
-            
+
             # Process daily data
-            if "data" not in daily_data or "account" not in daily_data["data"]:
-                _LOGGER.error("Unexpected API response structure")
-                return {}
-            
-            if daily_data["data"]["account"] is None:
-                _LOGGER.error("Account is None in response")
-                return {}
-            
-            properties = daily_data["data"]["account"].get("properties", [])
-            if not properties:
-                _LOGGER.warning("No properties in response")
-                return {}
-            
-            measurements = properties[0].get("measurements", {}).get("edges", [])
             _LOGGER.info("Found %d daily measurements", len(measurements))
 
+            # Always parse monthly readings even if daily data is empty
+            monthly_data_dict: dict[str, dict[str, Any]] = {}
+            for measurement in monthly_measurements:
+                node = measurement.get("node", {})
+                try:
+                    value = float(node.get("value"))
+                except (ValueError, TypeError) as e:
+                    _LOGGER.warning("Invalid monthly measurement value, using 0.0: %s", e)
+                    value = 0.0
+
+                start_at = node.get("startAt")
+                if start_at:
+                    date_str = start_at.split("T")[0]
+                    year_month = date_str[:7]
+                    monthly_data_dict[year_month] = {
+                        "value": round(value, 3),
+                        "start_date": date_str,
+                        "unit": "m³",
+                    }
+
+            monthly_readings = sorted(monthly_data_dict.values(), key=lambda x: x["start_date"])
+            _LOGGER.info("Found %d monthly readings (after deduplication)", len(monthly_readings))
+
             if not measurements:
-                _LOGGER.warning("No measurements found")
-                return {}
+                _LOGGER.warning("No daily measurements found; returning monthly-only payload")
+                return {
+                    "meter_id": f"{self.market_supply_point_id}_{self.device_id}",
+                    "yesterday_usage": None,
+                    "yesterday_date": None,
+                    "daily_average": None,
+                    "total_7day_usage": None,
+                    "week_to_date_usage": None,
+                    "previous_week_usage": None,
+                    "week_start_date": current_week_monday.isoformat(),
+                    "previous_week_start_date": previous_week_monday.isoformat(),
+                    "previous_week_end_date": (current_week_monday - timedelta(days=1)).isoformat(),
+                    "days_in_current_week": 0,
+                    "unit": "m³",
+                    "all_readings": [],
+                    "monthly_readings": monthly_readings,
+                    "daily_readings_since_official": [],
+                }
 
             # Process daily measurements (already aggregated by API)
             daily_totals = {}
@@ -431,36 +524,8 @@ class SevernTrentAPI:
             # Calculate average daily usage
             num_days = len(all_readings)
             avg_daily_usage = total_usage / num_days if num_days > 0 else 0
-            
-            # Process monthly data - deduplicate by month (API returns duplicates)
-            monthly_data_dict = {}  # Use dict to deduplicate by year-month
-            for measurement in monthly_measurements:
-                node = measurement["node"]
-                try:
-                    value = float(node["value"])
-                except (ValueError, TypeError) as e:
-                    _LOGGER.warning("Invalid monthly measurement value, using 0.0: %s", e)
-                    value = 0.0
 
-                start_at = node.get("startAt")
-
-                if start_at:
-                    # Extract full date and year-month for grouping
-                    date_str = start_at.split("T")[0]
-                    year_month = date_str[:7]  # Extract YYYY-MM
-
-                    # Keep the last (most recent/accurate) reading for each month
-                    # Store both the grouping key and full date
-                    monthly_data_dict[year_month] = {
-                        "value": round(value, 3),
-                        "start_date": date_str,
-                        "unit": "m³"
-                    }
-
-            # Convert dict back to list, sorted by date
-            monthly_readings = sorted(monthly_data_dict.values(), key=lambda x: x["start_date"])
-
-            _LOGGER.info("Found %d monthly readings (after deduplication)", len(monthly_readings))
+            # monthly_readings already parsed above
 
             # Fetch daily readings since official meter reading if mid-month
             daily_readings_since_official = []
@@ -711,4 +776,446 @@ class SevernTrentAPI:
             
         except Exception as e:
             _LOGGER.error("Error fetching manual meter readings: %s", e, exc_info=True)
+            return {}
+
+    def get_balance(self) -> dict[str, Any]:
+        """Get the current account balance.
+
+        The API appears to return the balance without a decimal point (e.g. 1234 means £12.34).
+        This method returns both the raw value and the converted GBP amount.
+        """
+        self._ensure_valid_token()
+
+        if not self.token:
+            _LOGGER.error("No token available when fetching balance")
+            return {}
+
+        if not self.account_number:
+            _LOGGER.error("No account number set when fetching balance")
+            return {}
+
+        try:
+            headers = {"Authorization": self.token}
+            response = self.session.post(
+                API_URL,
+                headers=headers,
+                json={
+                    "query": BALANCE_QUERY,
+                    "variables": {"accountNumber": self.account_number},
+                    "operationName": "GetBalance",
+                },
+            )
+
+            response.raise_for_status()
+            data = response.json()
+
+            if "errors" in data:
+                _LOGGER.error("GraphQL errors fetching balance: %s", data["errors"])
+                return {}
+
+            balance_raw = data.get("data", {}).get("account", {}).get("balance")
+            if balance_raw is None:
+                _LOGGER.error("Balance missing in response")
+                return {}
+
+            # Balance is returned without decimals (pence-like). Convert to GBP.
+            try:
+                balance_pence = int(str(balance_raw).strip())
+            except (TypeError, ValueError):
+                _LOGGER.error("Balance value not an integer: %r", balance_raw)
+                return {}
+
+            balance_gbp = round(balance_pence / 100.0, 2)
+
+            return {
+                "balance_pence": balance_pence,
+                "balance_gbp": balance_gbp,
+            }
+        except Exception as e:
+            _LOGGER.error("Error fetching balance: %s", e, exc_info=True)
+            return {}
+
+    def get_rate_limit_info(self) -> dict[str, Any]:
+        """Get API rate limit information.
+
+        Useful as a diagnostic to confirm whether the API is blocking requests.
+        """
+        self._ensure_valid_token()
+
+        if not self.token:
+            _LOGGER.error("No token available when fetching rate limit info")
+            return {}
+
+        try:
+            headers = {"Authorization": self.token}
+            response = self.session.post(
+                API_URL,
+                headers=headers,
+                json={
+                    "query": RATE_LIMIT_QUERY,
+                    "operationName": "apiRateLimitInfo",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            if "errors" in data:
+                _LOGGER.error("GraphQL errors fetching rate limit info: %s", data["errors"])
+                return {}
+
+            info = (
+                data.get("data", {})
+                .get("rateLimitInfo", {})
+                .get("pointsAllowanceRateLimit", {})
+            )
+            if not info:
+                _LOGGER.error("Rate limit info missing in response")
+                return {}
+
+            return {
+                "is_blocked": info.get("isBlocked"),
+                "limit": info.get("limit"),
+                "remaining_points": info.get("remainingPoints"),
+                "ttl": info.get("ttl"),
+                "used_points": info.get("usedPoints"),
+            }
+        except Exception as e:
+            _LOGGER.error("Error fetching rate limit info: %s", e, exc_info=True)
+            return {}
+
+    def get_current_active_payment_schedule(self) -> dict[str, Any]:
+        """Get the current active payment schedule for the account."""
+        self._ensure_valid_token()
+
+        if not self.token:
+            _LOGGER.error("No token available when fetching payment schedule")
+            return {}
+
+        if not self.account_number:
+            _LOGGER.error("No account number set when fetching payment schedule")
+            return {}
+
+        try:
+            headers = {"Authorization": self.token}
+            response = self.session.post(
+                API_URL,
+                headers=headers,
+                json={
+                    "query": PAYMENT_SCHEDULE_QUERY,
+                    "variables": {"accountNumber": self.account_number},
+                    "operationName": "CurrentActivePaymentSchedule",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            if "errors" in data:
+                _LOGGER.error("GraphQL errors fetching payment schedule: %s", data["errors"])
+                return {}
+
+            edges = (
+                data.get("data", {})
+                .get("account", {})
+                .get("paymentSchedules", {})
+                .get("edges", [])
+            )
+            if not edges:
+                return {}
+
+            node = edges[0].get("node") or {}
+            if not node:
+                return {}
+
+            amount_raw = node.get("paymentAmount")
+            amount_pence: int | None
+            amount_gbp: float | None
+            if amount_raw is None:
+                amount_pence = None
+                amount_gbp = None
+            else:
+                try:
+                    amount_pence = int(str(amount_raw).strip())
+                    amount_gbp = round(amount_pence / 100.0, 2)
+                except (TypeError, ValueError):
+                    amount_pence = None
+                    amount_gbp = None
+
+            return {
+                "id": node.get("id"),
+                "payment_day": node.get("paymentDay"),
+                "payment_amount_pence": amount_pence,
+                "payment_amount_gbp": amount_gbp,
+                "payment_frequency": node.get("paymentFrequency"),
+                "payment_frequency_multiplier": node.get("paymentFrequencyMultiplier"),
+                "is_variable_payment_amount": node.get("isVariablePaymentAmount"),
+                "valid_to": node.get("validTo"),
+                "schedule_type": node.get("scheduleType"),
+                "payment_plan": node.get("paymentPlan"),
+            }
+        except Exception as e:
+            _LOGGER.error("Error fetching payment schedule: %s", e, exc_info=True)
+            return {}
+
+    def get_meter_details(self) -> dict[str, Any]:
+        """Fetch meter details including number of digits and latest reading metadata."""
+        self._ensure_valid_token()
+
+        if not self.token:
+            _LOGGER.error("No token available when fetching meter details")
+            return {}
+
+        if not self.account_number:
+            _LOGGER.error("No account number set when fetching meter details")
+            return {}
+
+        try:
+            headers = {"Authorization": self.token}
+            active_from = datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+
+            response = self.session.post(
+                API_URL,
+                headers=headers,
+                json={
+                    "query": METER_DETAILS_QUERY,
+                    "variables": {
+                        "accountNumber": self.account_number,
+                        "excludeHeld": True,
+                        "first": 1,
+                        "activeFrom": active_from,
+                    },
+                    "operationName": "MeterDetails",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            if "errors" in data:
+                _LOGGER.error("GraphQL errors fetching meter details: %s", data["errors"])
+                return {}
+
+            props = (
+                data.get("data", {})
+                .get("account", {})
+                .get("properties", [])
+            )
+            if not props:
+                return {}
+
+            meters = props[0].get("activeWaterMeters", [])
+            if not meters:
+                return {}
+
+            meter = meters[0]
+            reading_edges = (meter.get("readings") or {}).get("edges", [])
+            latest = (reading_edges[0].get("node") if reading_edges else {}) or {}
+
+            number_of_digits = meter.get("numberOfDigits")
+            try:
+                number_of_digits_int = int(number_of_digits) if number_of_digits is not None else None
+            except (TypeError, ValueError):
+                number_of_digits_int = None
+
+            latest_value = latest.get("valueCubicMetres")
+            try:
+                latest_value_float = float(latest_value) if latest_value is not None else None
+            except (TypeError, ValueError):
+                latest_value_float = None
+
+            return {
+                "meter_internal_id": meter.get("id"),
+                "serial_number": meter.get("serialNumber"),
+                "number_of_digits": number_of_digits_int,
+                "latest_reading": latest_value_float,
+                "latest_reading_raw": latest_value,
+                "latest_reading_date": latest.get("readingDate"),
+                "latest_reading_source": latest.get("source"),
+                "latest_reading_id": latest.get("id"),
+                "latest_reading_is_held": latest.get("isHeld"),
+            }
+        except Exception as e:
+            _LOGGER.error("Error fetching meter details: %s", e, exc_info=True)
+            return {}
+
+    def get_outstanding_payment(self) -> dict[str, Any]:
+        """Get outstanding payments for the account.
+
+        The API appears to return values without a decimal point (pence-like).
+        """
+        self._ensure_valid_token()
+
+        if not self.token:
+            _LOGGER.error("No token available when fetching outstanding payments")
+            return {}
+
+        if not self.account_number:
+            _LOGGER.error("No account number set when fetching outstanding payments")
+            return {}
+
+        try:
+            headers = {"Authorization": self.token}
+            response = self.session.post(
+                API_URL,
+                headers=headers,
+                json={
+                    "query": OUTSTANDING_PAYMENT_QUERY,
+                    "variables": {"accountNumber": self.account_number},
+                    "operationName": "OutstandingPayment",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            if "errors" in data:
+                _LOGGER.error(
+                    "GraphQL errors fetching outstanding payments: %s", data["errors"]
+                )
+                return {}
+
+            ledgers = data.get("data", {}).get("account", {}).get("ledgers", [])
+            if not ledgers:
+                return {}
+
+            raw = ledgers[0].get("paymentsOutstanding")
+            if raw is None:
+                return {}
+
+            try:
+                pence = int(str(raw).strip())
+            except (TypeError, ValueError):
+                _LOGGER.error("Outstanding payment is not an integer: %r", raw)
+                return {}
+
+            return {
+                "payments_outstanding_pence": pence,
+                "payments_outstanding_gbp": round(pence / 100.0, 2),
+            }
+        except Exception as e:
+            _LOGGER.error("Error fetching outstanding payments: %s", e, exc_info=True)
+            return {}
+
+    def get_ledgers(self) -> list[dict[str, Any]]:
+        """Fetch ledgers for the account."""
+        self._ensure_valid_token()
+
+        if not self.token:
+            _LOGGER.error("No token available when fetching ledgers")
+            return []
+
+        if not self.account_number:
+            _LOGGER.error("No account number set when fetching ledgers")
+            return []
+
+        try:
+            headers = {"Authorization": self.token}
+            response = self.session.post(
+                API_URL,
+                headers=headers,
+                json={
+                    "query": LEDGERS_QUERY,
+                    "variables": {"accountNumber": self.account_number},
+                    "operationName": "Ledgers",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            if "errors" in data:
+                _LOGGER.error("GraphQL errors fetching ledgers: %s", data["errors"])
+                return []
+
+            ledgers = data.get("data", {}).get("account", {}).get("ledgers", [])
+            if not isinstance(ledgers, list):
+                return []
+
+            return ledgers
+        except Exception as e:
+            _LOGGER.error("Error fetching ledgers: %s", e, exc_info=True)
+            return []
+
+    def get_next_payment_forecast(self) -> dict[str, Any]:
+        """Fetch the next upcoming payment forecast (amount/date).
+
+        Uses the account's ledger number (typically ledgerType=SEVERN_TRENT_WATER).
+        """
+        self._ensure_valid_token()
+
+        if not self.token:
+            _LOGGER.error("No token available when fetching payment forecast")
+            return {}
+
+        if not self.account_number:
+            _LOGGER.error("No account number set when fetching payment forecast")
+            return {}
+
+        ledgers = self.get_ledgers()
+        if not ledgers:
+            return {}
+
+        ledger_number = None
+        for ledger in ledgers:
+            if ledger.get("ledgerType") == "SEVERN_TRENT_WATER":
+                ledger_number = ledger.get("number")
+                break
+        if not ledger_number:
+            ledger_number = ledgers[0].get("number")
+
+        if not ledger_number:
+            return {}
+
+        try:
+            headers = {"Authorization": self.token}
+            response = self.session.post(
+                API_URL,
+                headers=headers,
+                json={
+                    "query": PAYMENT_FORECAST_QUERY,
+                    "variables": {
+                        "accountNumber": self.account_number,
+                        "ledgerNumber": ledger_number,
+                        "first": 1,
+                    },
+                    "operationName": "PaymentForecast",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            if "errors" in data:
+                _LOGGER.error(
+                    "GraphQL errors fetching payment forecast: %s", data["errors"]
+                )
+                return {}
+
+            edges = (
+                data.get("data", {})
+                .get("account", {})
+                .get("paginatedPaymentForecast", {})
+                .get("edges", [])
+            )
+            if not edges:
+                return {"ledger_number": ledger_number}
+
+            node = edges[0].get("node") or {}
+            amount_raw = node.get("amount")
+            amount_pence: int | None
+            amount_gbp: float | None
+            if amount_raw is None:
+                amount_pence = None
+                amount_gbp = None
+            else:
+                try:
+                    amount_pence = int(str(amount_raw).strip())
+                    amount_gbp = round(amount_pence / 100.0, 2)
+                except (TypeError, ValueError):
+                    amount_pence = None
+                    amount_gbp = None
+
+            return {
+                "ledger_number": ledger_number,
+                "date": node.get("date"),
+                "amount_pence": amount_pence,
+                "amount_gbp": amount_gbp,
+            }
+        except Exception as e:
+            _LOGGER.error("Error fetching payment forecast: %s", e, exc_info=True)
             return {}
