@@ -14,6 +14,7 @@ from .const import (
     CONF_ACCOUNT_NUMBER,
     CONF_API_KEY,
     CONF_BROWSER_TOKEN,
+    CONF_CAPABILITY_TYPE,
     CONF_DEVICE_ID,
     CONF_MARKET_SUPPLY_POINT_ID,
     DOMAIN,
@@ -96,6 +97,7 @@ class SevernTrentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                             CONF_ACCOUNT_NUMBER: account_number,
                                             CONF_MARKET_SUPPLY_POINT_ID: self.api.market_supply_point_id,
                                             CONF_DEVICE_ID: self.api.device_id,
+                                            CONF_CAPABILITY_TYPE: self.api.capability_type,
                                         },
                                     )
                             else:
@@ -146,6 +148,7 @@ class SevernTrentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_API_KEY: self.api_key,
                             CONF_MARKET_SUPPLY_POINT_ID: self.api.market_supply_point_id,
                             CONF_DEVICE_ID: self.api.device_id,
+                            CONF_CAPABILITY_TYPE: self.api.capability_type,
                         },
                     )
                     
@@ -206,6 +209,7 @@ class SevernTrentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_MARKET_SUPPLY_POINT_ID
                         ),
                         CONF_DEVICE_ID: self._reauth_entry.data.get(CONF_DEVICE_ID),
+                        CONF_CAPABILITY_TYPE: self._reauth_entry.data.get(CONF_CAPABILITY_TYPE),
                     }
                     self.hass.config_entries.async_update_entry(
                         self._reauth_entry,
