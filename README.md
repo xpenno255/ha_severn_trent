@@ -25,7 +25,12 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 
 > **Note:** Daily usage sensors (yesterday, average, week-to-date, previous week) require a smart meter. Accounts with only manual meters will still see balance, payment, and meter reading sensors.
 
-> **v1.8.0**: This release fixes a critical bug where all smart meter API calls were failing due to invalid datetime formatting. If your smart meter sensors were showing "unavailable", upgrading to this version should resolve the issue. Financial sensors also now use the correct state class for long-term statistics.
+> **v1.8.0**: This release fixes **three critical bugs** that were causing smart meter sensors to show "unavailable":
+> 1. **DateTime double-timezone bug** — all API calls with datetime parameters were sending invalid format like `2026-05-22T00:00:00+00:00Z`, causing 400 errors
+> 2. **Invalid ReadingFrequencyType enum** — the daily readings retry used `"DAY"` instead of the correct `"DAILY"` enum value
+> 3. **MONETARY state class mismatch** — financial sensors used `MEASUREMENT` instead of `TOTAL`, preventing long-term statistics
+>
+> It also fixes a blocking call warning and adopts modern HA entity naming (`has_entity_name`). If your smart meter sensors were unavailable, upgrade to this version.
 
 ## Installation
 
@@ -356,6 +361,27 @@ This is an unofficial integration and is not affiliated with or endorsed by Seve
 For issues, questions, or feature requests, please open an issue on GitHub.
 
 ## Changelog
+
+### v1.8.0
+
+**Critical Fixes:**
+- Fixed DateTime double-timezone bug causing all smart meter API calls to fail with 400 errors
+  - Added `_api_dt()` helper to correctly format timezone-aware datetimes for the Kraken API
+  - Previously produced invalid format like `2026-05-22T00:00:00+00:00Z`
+- Fixed invalid `ReadingFrequencyType` enum value in daily readings retry (`"DAY"` → `"DAILY"`)
+- Fixed MONETARY sensor state class mismatch (`MEASUREMENT` → `TOTAL`) for all 5 financial sensors
+- Fixed blocking `requests.Session()` creation in HA event loop (now uses lazy `@property`)
+- Fixed `datetime.utcnow()` deprecation (5 occurrences → `datetime.now(timezone.utc)`)
+
+**New Sensors:**
+- `sensor.severn_trent_overdue_balance` — Shows overdue account balance separately
+- `sensor.severn_trent_smart_meter_status` — Diagnostic sensor showing smart meter data availability
+
+**Changes:**
+- Added `overdueBalance` field to balance query
+- Balance sensor now includes `overdue_balance_gbp` and `overdue_balance_pence` attributes
+- Added `_attr_has_entity_name = True` for proper HA entity naming (cleaner entity IDs)
+- 116 tests passing (4 new tests for `_api_dt()` helper)
 
 ### v1.7.0
 - Added overdue balance sensor (`sensor.severn_trent_overdue_balance`)
