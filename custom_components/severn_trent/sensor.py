@@ -101,7 +101,7 @@ class SevernTrentBalanceSensor(SevernTrentBaseSensor):
     """Sensor for current account balance."""
 
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "GBP"
     _attr_icon = "mdi:currency-gbp"
 
@@ -133,7 +133,7 @@ class SevernTrentOverdueBalanceSensor(SevernTrentBaseSensor):
     """Sensor for overdue account balance."""
 
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "GBP"
     _attr_icon = "mdi:cash-alert"
 
@@ -489,7 +489,7 @@ class SevernTrentPaymentAmountSensor(SevernTrentBaseSensor):
     """Sensor for the current active payment amount (e.g. direct debit)."""
 
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "GBP"
     _attr_icon = "mdi:cash-sync"
 
@@ -575,7 +575,7 @@ class SevernTrentOutstandingPaymentSensor(SevernTrentBaseSensor):
     """Sensor for outstanding payments."""
 
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "GBP"
     _attr_icon = "mdi:cash-alert"
 
@@ -608,7 +608,7 @@ class SevernTrentNextPaymentAmountSensor(_SevernTrentNextPaymentBase):
     """Sensor for the next upcoming payment amount."""
 
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "GBP"
     _attr_icon = "mdi:calendar-cash"
 

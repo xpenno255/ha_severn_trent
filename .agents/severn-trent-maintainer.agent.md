@@ -11,7 +11,7 @@ custom_components/severn_trent/
 ├── config_flow.py        # ConfigFlow + reauth flow
 ├── const.py             # DOMAIN, CONF_*, all GraphQL query/mutation strings
 ├── manifest.json        # HA manifest (domain, version, requirements, iot_class)
-├── sensor.py            # SensorEntity subclasses (18 sensors)
+├── sensor.py            # SensorEntity subclasses (19 sensors)
 ├── strings.json         # Config flow UI text (English)
 └── translations/
     └── en.json           # Same as strings.json (must stay in sync)
@@ -166,6 +166,9 @@ For each query/mutation in `const.py`:
 - **Type hints**: Use `from __future__ import annotations` and modern type syntax (`dict[str, Any]`, `list[str]`, `X | None`).
 - **Deprecation warnings**: Fix any `DeprecationWarning` immediately (e.g. `datetime.utcnow()` → `datetime.now(timezone.utc)`).
 - **Async safety**: Never call blocking I/O directly in async context. Always use `hass.async_add_executor_job()`.
+- **DateTime formatting**: Always use `_api_dt()` helper in `api.py` for formatting datetimes sent to the Kraken API. Never use `.isoformat() + "Z"` on timezone-aware datetimes — it produces invalid double-timezone format like `2026-05-22T00:00:00+00:00Z`.
+- **MONETARY device class**: `SensorDeviceClass.MONETARY` requires `SensorStateClass.TOTAL` or `None` — never use `SensorStateClass.MEASUREMENT`.
+- **Lazy initialization**: `requests.Session()` must not be created in `SevernTrentAPI.__init__()` because it runs in the HA event loop. Use a lazy `@property` instead.
 
 ---
 
@@ -227,3 +230,6 @@ When asked to validate endpoints:
 - **Do** keep `strings.json` and `translations/en.json` identical.
 - **Do** use `EntityCategory.DIAGNOSTIC` for rate-limit and meter-ID sensors.
 - **Do** ensure all sensors have proper `device_class`, `state_class`, and `unit_of_measurement`.
+- **Do** use `_api_dt()` for all datetime formatting in API calls (never `.isoformat() + "Z"` on timezone-aware datetimes).
+- **Do** use `SensorStateClass.TOTAL` (not `MEASUREMENT`) for `SensorDeviceClass.MONETARY` sensors.
+- **Do** use lazy `@property` for `requests.Session` to avoid blocking the HA event loop.

@@ -735,3 +735,53 @@ class TestEdgeCases:
         with patch.object(authenticated_api.session, "post", return_value=_make_response(empty_props_response)):
             result = authenticated_api.get_meter_details()
             assert result == {}
+
+
+# ======================================================================
+# 7. DateTime formatting helper
+# ======================================================================
+
+class TestApiDateTimeFormat:
+    """Tests for the _api_dt helper that formats datetimes for the API."""
+
+    def test_timezone_aware_datetime(self):
+        """Timezone-aware datetimes should produce clean ISO 8601 with Z suffix."""
+        from datetime import datetime, timezone
+        from custom_components.severn_trent.api import _api_dt
+
+        dt = datetime(2026, 5, 22, 0, 0, 0, tzinfo=timezone.utc)
+        result = _api_dt(dt)
+        assert result == "2026-05-22T00:00:00Z"
+        # Must NOT contain double-timezone like +00:00Z
+        assert "+00:00Z" not in result
+
+    def test_timezone_aware_datetime_with_time(self):
+        """Timezone-aware datetimes with non-zero time should format correctly."""
+        from datetime import datetime, timezone
+        from custom_components.severn_trent.api import _api_dt
+
+        dt = datetime(2026, 5, 22, 14, 30, 45, tzinfo=timezone.utc)
+        result = _api_dt(dt)
+        assert result == "2026-05-22T14:30:45Z"
+
+    def test_naive_datetime(self):
+        """Naive datetimes should get Z appended (assumed UTC)."""
+        from datetime import datetime
+        from custom_components.severn_trent.api import _api_dt
+
+        dt = datetime(2026, 5, 11, 0, 0, 0)
+        result = _api_dt(dt)
+        assert result == "2026-05-11T00:00:00Z"
+
+    def test_no_double_timezone(self):
+        """Regression test: timezone-aware datetimes must not produce +00:00Z."""
+        from datetime import datetime, timezone, timedelta
+        from custom_components.severn_trent.api import _api_dt
+
+        # This is the exact pattern that caused the production bug
+        dt = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        result = _api_dt(dt)
+        assert "+00:00Z" not in result
+        assert result.endswith("Z")
+        # Should be a valid ISO 8601 datetime
+        assert "T" in result

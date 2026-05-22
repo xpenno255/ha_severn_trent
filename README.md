@@ -25,6 +25,8 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 
 > **Note:** Daily usage sensors (yesterday, average, week-to-date, previous week) require a smart meter. Accounts with only manual meters will still see balance, payment, and meter reading sensors.
 
+> **v1.8.0**: This release fixes a critical bug where all smart meter API calls were failing due to invalid datetime formatting. If your smart meter sensors were showing "unavailable", upgrading to this version should resolve the issue. Financial sensors also now use the correct state class for long-term statistics.
+
 ## Installation
 
 ### HACS Installation (Recommended)

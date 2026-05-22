@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-05-22
+
+### Fixed
+- **Critical Fix**: DateTime double-timezone bug causing all smart meter API calls to fail with 400 errors
+  - Timezone-aware datetimes formatted with `.isoformat() + "Z"` produced invalid format like `2026-05-22T00:00:00+00:00Z`
+  - The Kraken API rejected these with `DateTime cannot represent value` error
+  - Added `_api_dt()` helper function that correctly formats both timezone-aware and naive datetimes
+  - Affected: smart meter daily/monthly readings, manual meter readings, and meter details queries
+- **Critical Fix**: MONETARY sensor state class mismatch causing HA warnings
+  - Changed `SensorStateClass.MEASUREMENT` → `SensorStateClass.TOTAL` for all 5 financial sensors
+  - HA requires `TOTAL` or `None` for `SensorDeviceClass.MONETARY`; `MEASUREMENT` is invalid
+  - Affected sensors: Balance, Overdue Balance, Payment Amount, Outstanding Payment, Next Payment Amount
+- **Fix**: Blocking `requests.Session()` creation in HA event loop
+  - Changed from eager initialization in `__init__` to lazy property
+  - Prevents HA warning about blocking calls in the event loop
+- **Fix**: Replaced all `datetime.utcnow()` calls with `datetime.now(timezone.utc)` (5 occurrences)
+  - `datetime.utcnow()` is deprecated in Python 3.12+
+  - Prevents `DeprecationWarning` errors when running with `-W error::DeprecationWarning`
+
+### Added
+- **New Sensor**: `sensor.severn_trent_overdue_balance` – Shows overdue account balance separately
+- **New Sensor**: `sensor.severn_trent_smart_meter_status` – Diagnostic sensor showing smart meter data availability
+- **New Field**: `overdueBalance` added to `BALANCE_QUERY` GraphQL query
+- **New Tests**: 4 tests for `_api_dt()` datetime formatting helper (total: 116 tests)
+
+### Changed
+- Balance sensor now includes `overdue_balance_gbp` and `overdue_balance_pence` as extra state attributes
+
 ### [1.5.2] - 2026-01-20
 -- bump version to fix an issue with home asisstant
 

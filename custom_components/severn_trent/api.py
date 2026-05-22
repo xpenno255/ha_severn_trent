@@ -9,6 +9,21 @@ from typing import Any
 
 import requests
 
+
+def _api_dt(dt: datetime) -> str:
+    """Format a datetime for the Kraken GraphQL API.
+
+    The API expects ISO 8601 with a timezone indicator.
+    Avoid double-encoding: if the datetime is timezone-aware,
+    .isoformat() already includes '+00:00', so don't append 'Z'.
+    """
+    if dt.tzinfo is not None:
+        # Timezone-aware: replace +00:00 suffix with Z for clean format
+        return dt.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+    # Naive datetime: assume UTC and append Z
+    return dt.isoformat() + "Z"
+
+
 from .const import (
     API_KEY_MUTATION,
     API_URL,
@@ -48,8 +63,15 @@ class SevernTrentAPI:
         self.token = None
         self.refresh_token = None
         self.token_expires_at = 0
-        self.session = requests.Session()
+        self._session: requests.Session | None = None
         self.meter_identifiers_fetched = False
+
+    @property
+    def session(self) -> requests.Session:
+        """Lazy-initialise the requests session to avoid blocking the event loop."""
+        if self._session is None:
+            self._session = requests.Session()
+        return self._session
 
     @staticmethod
     def _normalize_browser_token(browser_token: str) -> str:
@@ -324,8 +346,8 @@ class SevernTrentAPI:
                     "query": SMART_METER_READINGS_QUERY,
                     "variables": {
                         "accountNumber": self.account_number,
-                        "startAt": start_date.isoformat() + "Z",
-                        "endAt": end_date.isoformat() + "Z",
+                        "startAt": _api_dt(start_date),
+                        "endAt": _api_dt(end_date),
                         "utilityFilters": [{
                             "waterFilters": {
                                 "readingFrequencyType": "DAY_INTERVAL",
@@ -367,8 +389,8 @@ class SevernTrentAPI:
                         "query": SMART_METER_READINGS_QUERY,
                         "variables": {
                             "accountNumber": self.account_number,
-                            "startAt": start_date.isoformat() + "Z",
-                            "endAt": end_date.isoformat() + "Z",
+                            "startAt": _api_dt(start_date),
+                            "endAt": _api_dt(end_date),
                             "utilityFilters": [
                                 {
                                     "waterFilters": {
@@ -405,8 +427,8 @@ class SevernTrentAPI:
                     "query": SMART_METER_READINGS_QUERY,
                     "variables": {
                         "accountNumber": self.account_number,
-                        "startAt": monthly_start.isoformat() + "Z",
-                        "endAt": end_date.isoformat() + "Z",
+                        "startAt": _api_dt(monthly_start),
+                        "endAt": _api_dt(end_date),
                         "utilityFilters": [{
                             "waterFilters": {
                                 "readingFrequencyType": "MONTH_INTERVAL",
@@ -567,8 +589,8 @@ class SevernTrentAPI:
                                 "query": SMART_METER_READINGS_QUERY,
                                 "variables": {
                                     "accountNumber": self.account_number,
-                                    "startAt": official_dt.isoformat() + "Z",
-                                    "endAt": partial_month_end.isoformat() + "Z",
+                                    "startAt": _api_dt(official_dt),
+                                    "endAt": _api_dt(partial_month_end),
                                     "utilityFilters": [{
                                         "waterFilters": {
                                             "readingFrequencyType": "DAY_INTERVAL",
@@ -687,7 +709,7 @@ class SevernTrentAPI:
         
         try:
             # Get readings from the past year
-            active_from = (datetime.now(timezone.utc) - timedelta(days=365)).isoformat() + "Z"
+            active_from = _api_dt(datetime.now(timezone.utc) - timedelta(days=365))
             
             _LOGGER.debug("Fetching manual meter readings")
             
@@ -994,7 +1016,7 @@ class SevernTrentAPI:
 
         try:
             headers = {"Authorization": self.token}
-            active_from = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+            active_from = _api_dt(datetime.now(timezone.utc))
 
             response = self.session.post(
                 API_URL,
