@@ -152,9 +152,10 @@ class TestBalanceQuery:
         assert _extract_operation_name(BALANCE_QUERY) == "GetBalance"
 
     def test_contains_account_and_balance(self):
-        """BALANCE_QUERY should query account.balance."""
+        """BALANCE_QUERY should query account.balance and overdueBalance."""
         assert "account" in BALANCE_QUERY
         assert "balance" in BALANCE_QUERY
+        assert "overdueBalance" in BALANCE_QUERY
 
     def test_accepts_account_number_variable(self):
         """BALANCE_QUERY should accept $accountNumber variable."""

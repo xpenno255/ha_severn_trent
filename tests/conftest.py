@@ -209,7 +209,8 @@ MANUAL_READINGS_RESPONSE = {
 BALANCE_RESPONSE = {
     "data": {
         "account": {
-            "balance": 12345  # £123.45 in pence-like format
+            "balance": 12345,  # £123.45 in pence-like format
+            "overdueBalance": 5000  # £50.00 in pence-like format
         }
     }
 }

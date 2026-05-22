@@ -299,10 +299,10 @@ class SevernTrentAPI:
 
             # Get data for current week and previous complete week
             # Need to fetch enough to cover: yesterday, 7-day average, current week, AND previous week
-            end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            end_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
             # Calculate how many days back to the start of previous week (Monday)
-            today = datetime.now().date()
+            today = datetime.now(timezone.utc).date()
             days_since_monday = today.weekday()  # 0 = Monday, 6 = Sunday
             current_week_monday = today - timedelta(days=days_since_monday)
             previous_week_monday = current_week_monday - timedelta(days=7)
@@ -501,7 +501,7 @@ class SevernTrentAPI:
                 return {}
 
             # Calculate yesterday's date (today - 1 day) to match website behavior
-            yesterday = (datetime.now().date() - timedelta(days=1)).isoformat()
+            yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
 
             # Get yesterday's total from the specific date
             yesterday_total = daily_totals.get(yesterday, 0.0)
@@ -610,7 +610,7 @@ class SevernTrentAPI:
             previous_week_end_date = None
             days_in_current_week = 0
 
-            today = datetime.now().date()
+            today = datetime.now(timezone.utc).date()
             # Get Monday of current week (weekday() returns 0 for Monday)
             days_since_monday = today.weekday()
             current_week_monday = today - timedelta(days=days_since_monday)
@@ -677,7 +677,7 @@ class SevernTrentAPI:
         
         try:
             # Get readings from the past year
-            active_from = (datetime.now() - timedelta(days=365)).isoformat() + "Z"
+            active_from = (datetime.now(timezone.utc) - timedelta(days=365)).isoformat() + "Z"
             
             _LOGGER.debug("Fetching manual meter readings")
             
@@ -813,7 +813,8 @@ class SevernTrentAPI:
                 _LOGGER.error("GraphQL errors fetching balance: %s", data["errors"])
                 return {}
 
-            balance_raw = data.get("data", {}).get("account", {}).get("balance")
+            account_data = data.get("data", {}).get("account", {})
+            balance_raw = account_data.get("balance")
             if balance_raw is None:
                 _LOGGER.error("Balance missing in response")
                 return {}
@@ -827,9 +828,22 @@ class SevernTrentAPI:
 
             balance_gbp = round(balance_pence / 100.0, 2)
 
+            # Overdue balance (also pence-like)
+            overdue_raw = account_data.get("overdueBalance")
+            overdue_pence: int | None = None
+            overdue_gbp: float | None = None
+            if overdue_raw is not None:
+                try:
+                    overdue_pence = int(str(overdue_raw).strip())
+                    overdue_gbp = round(overdue_pence / 100.0, 2)
+                except (TypeError, ValueError):
+                    _LOGGER.warning("Overdue balance value not an integer: %r", overdue_raw)
+
             return {
                 "balance_pence": balance_pence,
                 "balance_gbp": balance_gbp,
+                "overdue_balance_pence": overdue_pence,
+                "overdue_balance_gbp": overdue_gbp,
             }
         except Exception as e:
             _LOGGER.error("Error fetching balance: %s", e, exc_info=True)

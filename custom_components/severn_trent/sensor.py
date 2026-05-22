@@ -80,6 +80,7 @@ async def async_setup_entry(
         SevernTrentMeterReadingSensor(coordinator, account_number),
         SevernTrentEstimatedMeterReadingSensor(coordinator, account_number),
         SevernTrentBalanceSensor(coordinator, account_number),
+        SevernTrentOverdueBalanceSensor(coordinator, account_number),
         SevernTrentRateLimitRemainingSensor(coordinator, account_number),
         SevernTrentMarketSupplyPointIdSensor(coordinator, account_number),
         SevernTrentDeviceIdSensor(coordinator, account_number),
@@ -119,8 +120,40 @@ class SevernTrentBalanceSensor(SevernTrentBaseSensor):
         attrs: dict[str, Any] = {}
         if "balance_pence" in balance:
             attrs["balance_pence"] = balance.get("balance_pence")
+        if "overdue_balance_gbp" in balance and balance.get("overdue_balance_gbp") is not None:
+            attrs["overdue_balance_gbp"] = balance.get("overdue_balance_gbp")
+        if "overdue_balance_pence" in balance and balance.get("overdue_balance_pence") is not None:
+            attrs["overdue_balance_pence"] = balance.get("overdue_balance_pence")
         self._attr_extra_state_attributes = attrs
         super()._handle_coordinator_update()
+
+
+class SevernTrentOverdueBalanceSensor(SevernTrentBaseSensor):
+    """Sensor for overdue account balance."""
+
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "GBP"
+    _attr_icon = "mdi:cash-alert"
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator,
+        account_number: str,
+    ) -> None:
+        super().__init__(coordinator, account_number)
+        self._attr_name = "Severn Trent Overdue Balance"
+        self._attr_unique_id = f"{account_number}_overdue_balance"
+
+    def _handle_coordinator_update(self) -> None:
+        data = self.coordinator.data or {}
+        balance = data.get("balance") or {}
+        self._attr_native_value = balance.get("overdue_balance_gbp")
+        self._attr_extra_state_attributes = {
+            "overdue_balance_pence": balance.get("overdue_balance_pence"),
+        }
+        super()._handle_coordinator_update()
+
 
 class SevernTrentYesterdayUsageSensor(SevernTrentBaseSensor):
     """Sensor for yesterday's water usage."""

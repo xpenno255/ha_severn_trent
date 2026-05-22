@@ -1,9 +1,18 @@
 {
     "cSpell.words": [
+        "aiohttp",
+        "blackhole",
+        "conftest",
         "HACS",
+        "hass",
         "homeassistant",
+        "minimise",
+        "MSPID",
         "severn",
         "timedelta",
-        "trent"
+        "timespec",
+        "trent",
+        "utcnow",
+        "xpenno"
     ]
 }

@@ -107,6 +107,7 @@ BALANCE_QUERY = """
 query GetBalance($accountNumber: String!) {
   account(accountNumber: $accountNumber) {
     balance
+    overdueBalance
   }
 }
 """
