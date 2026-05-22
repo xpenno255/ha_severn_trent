@@ -11,14 +11,19 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 - **Previous Week**: View your total water consumption for the previous week (Monday-Sunday)
 - **Meter Reading**: Official cumulative meter readings with historical data and usage between readings
 - **Estimated Current Meter Reading**: Accurate estimate of your current meter position based on official reading + daily/monthly usage
+- **Account Balance**: Current account balance and overdue balance
+- **Payment Information**: Direct debit amount, next payment date, and outstanding payments
+- **Smart Meter Diagnostics**: Meter ID, capability type, API rate limit status, and smart meter data availability
 - **Automatic Updates**: Data refreshes every hour
 - **Native Home Assistant Integration**: Full support for Home Assistant's sensor platform with proper units and device classes
 
 ## Requirements
 
 - Home Assistant 2025.1 or newer
-- A Severn Trent online account with smart meter
+- A Severn Trent online account
 - A temporary Authorization token from your Severn Trent browser session
+
+> **Note:** Daily usage sensors (yesterday, average, week-to-date, previous week) require a smart meter. Accounts with only manual meters will still see balance, payment, and meter reading sensors.
 
 ## Installation
 
@@ -91,16 +96,41 @@ See the [Token Retrieval Guide](docs/token_retrieval.md) for detailed instructio
 
 ## Sensors
 
-The integration creates six sensors:
+The integration creates 19 sensors grouped into a single device per account:
 
-| Sensor | Description | Unit |
-|--------|-------------|------|
-| `sensor.severn_trent_yesterday_usage` | Water consumed yesterday | m³ |
-| `sensor.severn_trent_daily_average` | Average daily usage over 7 days | m³ |
-| `sensor.severn_trent_week_to_date` | Water consumed this week (Mon-present) | m³ |
-| `sensor.severn_trent_previous_week` | Water consumed last week (Mon-Sun) | m³ |
-| `sensor.severn_trent_meter_reading` | Official cumulative meter reading | m³ |
-| `sensor.severn_trent_estimated_meter_reading` | Estimated current meter reading | m³ |
+### Water Usage Sensors
+
+| Sensor | Description | Unit | Category |
+|--------|-------------|------|----------|
+| `sensor.severn_trent_yesterday_usage` | Water consumed yesterday | m³ | — |
+| `sensor.severn_trent_daily_average` | Average daily usage over 7 days | m³ | — |
+| `sensor.severn_trent_week_to_date` | Water consumed this week (Mon–present) | m³ | — |
+| `sensor.severn_trent_previous_week` | Water consumed last week (Mon–Sun) | m³ | — |
+| `sensor.severn_trent_meter_reading` | Official cumulative meter reading | m³ | — |
+| `sensor.severn_trent_estimated_meter_reading` | Estimated current meter reading | m³ | — |
+
+### Financial Sensors
+
+| Sensor | Description | Unit | Category |
+|--------|-------------|------|----------|
+| `sensor.severn_trent_balance` | Current account balance | GBP | — |
+| `sensor.severn_trent_overdue_balance` | Overdue account balance | GBP | — |
+| `sensor.severn_trent_payment_amount` | Direct debit payment amount | GBP | — |
+| `sensor.severn_trent_outstanding_payment` | Outstanding payment amount | GBP | — |
+| `sensor.severn_trent_next_payment_amount` | Next scheduled payment amount | GBP | — |
+| `sensor.severn_trent_next_payment_date` | Next scheduled payment date | date | — |
+
+### Diagnostic Sensors
+
+| Sensor | Description | Unit | Category |
+|--------|-------------|------|----------|
+| `sensor.severn_trent_meter_digits` | Number of digits on the meter | — | Diagnostic |
+| `sensor.severn_trent_latest_reading_meta` | Latest reading metadata (ID, source, date) | — | Diagnostic |
+| `sensor.severn_trent_market_supply_point_id` | Market Supply Point ID | — | Diagnostic |
+| `sensor.severn_trent_device_id` | Meter device/serial number | — | Diagnostic |
+| `sensor.severn_trent_meter_capability` | Meter capability type (e.g. SMART_METER) | — | Diagnostic |
+| `sensor.severn_trent_api_rate_limit_remaining` | API rate limit points remaining | points | Diagnostic |
+| `sensor.severn_trent_smart_meter_status` | Smart meter data availability status | — | Diagnostic |
 
 ### Sensor Attributes
 
@@ -140,6 +170,28 @@ Each sensor includes additional attributes:
 - Number of monthly periods included (complete months)
 - Estimation note
 
+**Balance:**
+- Balance in pence
+- Overdue balance in GBP and pence
+
+**Overdue Balance:**
+- Overdue balance in pence
+
+**Payment Amount:**
+- Schedule ID
+- Payment amount in pence
+- Payment day, frequency, and frequency multiplier
+- Whether the amount is variable
+- Valid-to date and schedule type
+
+**Smart Meter Status:**
+- Whether smart meter data is available
+- Whether manual meter data is available
+- Individual field values (yesterday_usage, daily_average, etc.)
+- Meter ID
+- Monthly and daily readings counts
+- Reason for unavailability (if applicable)
+
 ## How the Estimated Meter Reading Works
 
 The estimated meter reading provides an accurate prediction of your current meter position:
@@ -166,13 +218,35 @@ This gives you an accurate running total between official 6-monthly readings.
 
 ## Data Sources
 
-The integration uses three data sources:
+The integration uses multiple API endpoints:
 
-1. **Smart Meter Hourly Data**: Automated readings taken every hour, aggregated into daily totals for the past 7 days
-2. **Smart Meter Monthly Data**: Monthly usage totals for the past 12 months (includes partial current month)
+1. **Smart Meter Daily Data**: Automated readings aggregated into daily totals for the past 2+ weeks (covers current and previous week)
+2. **Smart Meter Monthly Data**: Monthly usage totals for the past 12 months (used for estimated meter reading)
 3. **Manual Meter Readings**: Official readings taken periodically (typically bi-annually) showing cumulative meter totals
+4. **Account Balance**: Current balance and overdue balance
+5. **Payment Schedule**: Direct debit/payment plan details
+6. **Meter Details**: Meter configuration (digits, serial number)
+7. **Rate Limit Info**: API rate limit status and remaining points
+8. **Ledgers**: Account ledger information (for identifying water accounts)
+9. **Payment Forecast**: Next upcoming payment
 
 ## Troubleshooting
+
+### Smart Meter Sensors Show "Unavailable"
+
+If `yesterday_usage`, `daily_average`, `week_to_date`, or `previous_week` show as **unavailable**, check the `sensor.severn_trent_smart_meter_status` diagnostic sensor:
+
+| Status | Meaning |
+|--------|---------|
+| `ok` | Smart meter data is available with daily readings |
+| `manual_only` | Only manual meter readings available — your account may not have a smart meter |
+| `no_daily_data` | Smart meter data exists but daily readings aren't available |
+| `error` | No data returned from the API at all |
+
+Common causes:
+- **No smart meter**: If your account only has a manual meter, daily usage sensors will be unavailable. The meter reading and estimated meter reading sensors will still work.
+- **API rate limiting**: Check `sensor.severn_trent_api_rate_limit_remaining` — if `is_blocked` is `true`, wait for the rate limit to reset.
+- **Incorrect meter identifiers**: Try reconfiguring the integration to rediscover meter details.
 
 ### No Data Showing
 
@@ -280,6 +354,20 @@ This is an unofficial integration and is not affiliated with or endorsed by Seve
 For issues, questions, or feature requests, please open an issue on GitHub.
 
 ## Changelog
+
+### v1.7.0
+- Added overdue balance sensor (`sensor.severn_trent_overdue_balance`)
+- Added smart meter status diagnostic sensor (`sensor.severn_trent_smart_meter_status`)
+- Added next payment amount and date sensors
+- Added outstanding payment sensor
+- Added meter digits and latest reading metadata diagnostic sensors
+- Added API rate limit remaining diagnostic sensor
+- Added market supply point ID, device ID, and capability type diagnostic sensors
+- Added payment amount sensor (direct debit details)
+- Fixed `datetime.utcnow()` deprecation — all datetime calls now use `datetime.now(timezone.utc)`
+- Improved diagnostic logging for smart meter data availability
+- Better error messages when smart meter data is unavailable
+- Updated README with full sensor documentation
 
 ### v1.5.2
 -- bump version to fix an issue with home assistant
