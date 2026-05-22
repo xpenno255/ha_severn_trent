@@ -89,7 +89,7 @@ For each query/mutation in `const.py`:
 - **Rate limit**: `rateLimitInfo > pointsAllowanceRateLimit` (no account number required).
 - **Ledgers**: Returns `number` and `ledgerType`; filter by `SEVERN_TRENT_WATER` for water accounts.
 - **Error codes**: `KT-CT-4177` (Unauthorized), `KT-CT-1113` (Disabled GraphQL field), `KT-CT-4178` (No account found).
-- **ReadingFrequencyType enum**: Valid values: `DAILY`, `DAY_INTERVAL`, `MONTH_INTERVAL`, `HOUR_INTERVAL`, `FIFTEEN_MIN_INTERVAL`, `FIVE_MIN_INTERVAL`, `THIRTY_MIN_INTERVAL`, `QUARTER_INTERVAL`, `WEEK_INTERVAL`, `RAW_INTERVAL`, `INTERVALIZED`, `POINT_IN_TIME`. Note: `DAILY` ≠ `DAY_INTERVAL` — `DAILY` is "readings taken on a day to day basis" while `DAY_INTERVAL` is interval-based daily readings.
+- **ReadingFrequencyType enum**: Valid values: `DAILY`, `DAY_INTERVAL`, `MONTH_INTERVAL`, `HOUR_INTERVAL`, `FIFTEEN_MIN_INTERVAL`, `FIVE_MIN_INTERVAL`, `THIRTY_MIN_INTERVAL`, `QUARTER_INTERVAL`, `WEEK_INTERVAL`, `RAW_INTERVAL`, `INTERVALIZED`, `POINT_IN_TIME`. Note: `DAILY` ≠ `DAY_INTERVAL` — `DAILY` is "readings taken on a day to day basis" while `DAY_INTERVAL` is interval-based daily readings. VISUAL and MANUAL meters do not support `DAILY` or `DAY_INTERVAL` — they return `KT-CT-4710: Unsupported aggregation interval`.
 
 ---
 

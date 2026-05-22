@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Changed `"DAY"` → `"DAILY"` to match the Kraken GraphQL schema
   - The API returned `400 Bad Request: Value 'DAY' does not exist in 'ReadingFrequencyType' enum`
   - This caused the retry fallback to fail when `DAY_INTERVAL` returned no data
+- **Fix**: Skip `DAILY` retry for VISUAL/MANUAL meters that don't support daily aggregation
+  - VISUAL and MANUAL meters return `KT-CT-4710: Unsupported aggregation interval` for `DAILY`
+  - Now skips the retry and logs an info message instead of making a doomed API call
 
 ### Added
 - **New Sensor**: `sensor.severn_trent_overdue_balance` – Shows overdue account balance separately

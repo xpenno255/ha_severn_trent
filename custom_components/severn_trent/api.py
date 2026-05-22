@@ -376,7 +376,8 @@ class SevernTrentAPI:
                 return {}
 
             # Some accounts/meters appear to return 0 edges for DAY_INTERVAL; try an alternate enum.
-            if not measurements:
+            # Only retry for smart meter types (AMI/AMR) — VISUAL/MANUAL meters don't support daily aggregation.
+            if not measurements and self.capability_type not in ("VISUAL", "MANUAL"):
                 _LOGGER.warning(
                     "No daily measurements returned for DAY_INTERVAL (MSPID=%s, DeviceID=%s); "
                     "retrying with readingFrequencyType=DAILY",
@@ -415,6 +416,12 @@ class SevernTrentAPI:
                     retry_measurements = _extract_measurements(daily_data)
                     if retry_measurements is not None:
                         measurements = retry_measurements
+            elif not measurements:
+                _LOGGER.info(
+                    "No daily measurements for %s meter (MSPID=%s, DeviceID=%s); "
+                    "skipping DAILY retry as this meter type does not support daily aggregation",
+                    self.capability_type, self.market_supply_point_id, self.device_id,
+                )
             
             # Fetch monthly readings (last 12 months for estimation calculations)
             monthly_start = end_date - timedelta(days=365)

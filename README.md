@@ -369,6 +369,7 @@ For issues, questions, or feature requests, please open an issue on GitHub.
   - Added `_api_dt()` helper to correctly format timezone-aware datetimes for the Kraken API
   - Previously produced invalid format like `2026-05-22T00:00:00+00:00Z`
 - Fixed invalid `ReadingFrequencyType` enum value in daily readings retry (`"DAY"` → `"DAILY"`)
+- Skip `DAILY` retry for VISUAL/MANUAL meters (they don't support daily aggregation)
 - Fixed MONETARY sensor state class mismatch (`MEASUREMENT` → `TOTAL`) for all 5 financial sensors
 - Fixed blocking `requests.Session()` creation in HA event loop (now uses lazy `@property`)
 - Fixed `datetime.utcnow()` deprecation (5 occurrences → `datetime.now(timezone.utc)`)
