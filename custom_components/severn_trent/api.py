@@ -349,12 +349,16 @@ class SevernTrentAPI:
             if measurements is None:
                 _LOGGER.error("Unexpected daily readings response structure")
                 _LOGGER.debug("Daily readings response keys: %s", list(daily_data.keys()))
+                # Log the actual response for debugging (truncated)
+                _LOGGER.debug("Daily readings response: %s", json.dumps(daily_data, indent=2)[:1000])
                 return {}
 
             # Some accounts/meters appear to return 0 edges for DAY_INTERVAL; try an alternate enum.
             if not measurements:
                 _LOGGER.warning(
-                    "No daily measurements returned for DAY_INTERVAL; retrying with readingFrequencyType=DAY"
+                    "No daily measurements returned for DAY_INTERVAL (MSPID=%s, DeviceID=%s); "
+                    "retrying with readingFrequencyType=DAY",
+                    self.market_supply_point_id, self.device_id,
                 )
                 daily_retry = self.session.post(
                     API_URL,
@@ -456,7 +460,13 @@ class SevernTrentAPI:
             _LOGGER.info("Found %d monthly readings (after deduplication)", len(monthly_readings))
 
             if not measurements:
-                _LOGGER.warning("No daily measurements found; returning monthly-only payload")
+                _LOGGER.warning(
+                    "No daily measurements found for account %s (MSPID=%s, DeviceID=%s, "
+                    "capabilityType=%s); returning monthly-only payload. "
+                    "This usually means the meter does not have smart/daily readings available.",
+                    self.account_number, self.market_supply_point_id,
+                    self.device_id, self.capability_type,
+                )
                 return {
                     "meter_id": f"{self.market_supply_point_id}_{self.device_id}",
                     "yesterday_usage": None,

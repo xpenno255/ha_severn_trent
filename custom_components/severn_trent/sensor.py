@@ -91,6 +91,7 @@ async def async_setup_entry(
         SevernTrentOutstandingPaymentSensor(coordinator, account_number),
         SevernTrentNextPaymentAmountSensor(coordinator, account_number),
         SevernTrentNextPaymentDateSensor(coordinator, account_number),
+        SevernTrentSmartMeterStatusSensor(coordinator, account_number),
     ]
 
     async_add_entities(sensors)
@@ -662,4 +663,61 @@ class SevernTrentNextPaymentDateSensor(_SevernTrentNextPaymentBase):
             "amount_pence": nxt.get("amount_pence"),
             "ledger_number": nxt.get("ledger_number"),
         }
+        super()._handle_coordinator_update()
+
+
+class SevernTrentSmartMeterStatusSensor(SevernTrentBaseSensor):
+    """Diagnostic sensor showing smart meter data availability status."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:wifi"
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator,
+        account_number: str,
+    ) -> None:
+        super().__init__(coordinator, account_number)
+        self._attr_name = "Severn Trent Smart Meter Status"
+        self._attr_unique_id = f"{account_number}_smart_meter_status"
+
+    def _handle_coordinator_update(self) -> None:
+        data = self.coordinator.data or {}
+        smart = data.get("smart_meter") or {}
+        manual = data.get("manual_meter") or {}
+
+        if not smart and not manual:
+            self._attr_native_value = "error"
+            self._attr_extra_state_attributes = {
+                "smart_meter_data": False,
+                "manual_meter_data": False,
+                "reason": "No data returned from API",
+            }
+        elif not smart:
+            self._attr_native_value = "manual_only"
+            self._attr_extra_state_attributes = {
+                "smart_meter_data": False,
+                "manual_meter_data": bool(manual),
+                "reason": "Smart meter readings unavailable; only manual readings returned",
+                "meter_id": manual.get("meter_id"),
+            }
+        else:
+            yesterday = smart.get("yesterday_usage")
+            daily_avg = smart.get("daily_average")
+            wtd = smart.get("week_to_date_usage")
+            prev_week = smart.get("previous_week_usage")
+            has_daily_data = yesterday is not None or daily_avg is not None
+            self._attr_native_value = "ok" if has_daily_data else "no_daily_data"
+            self._attr_extra_state_attributes = {
+                "smart_meter_data": True,
+                "manual_meter_data": bool(manual),
+                "has_daily_readings": has_daily_data,
+                "yesterday_usage": yesterday,
+                "daily_average": daily_avg,
+                "week_to_date_usage": wtd,
+                "previous_week_usage": prev_week,
+                "meter_id": smart.get("meter_id"),
+                "monthly_readings_count": len(smart.get("monthly_readings", [])),
+                "all_readings_count": len(smart.get("all_readings", [])),
+            }
         super()._handle_coordinator_update()
