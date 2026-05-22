@@ -26,6 +26,8 @@ _LOGGER = logging.getLogger(__name__)
 class SevernTrentBaseSensor(SensorEntity):
     """Base sensor with device info."""
 
+    _attr_has_entity_name = True
+
     def __init__(
         self,
         coordinator: DataUpdateCoordinator,
@@ -111,7 +113,7 @@ class SevernTrentBalanceSensor(SevernTrentBaseSensor):
         account_number: str,
     ) -> None:
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Balance"
+        self._attr_name = "Balance"
         self._attr_unique_id = f"{account_number}_balance"
 
     def _handle_coordinator_update(self) -> None:
@@ -143,7 +145,7 @@ class SevernTrentOverdueBalanceSensor(SevernTrentBaseSensor):
         account_number: str,
     ) -> None:
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Overdue Balance"
+        self._attr_name = "Overdue Balance"
         self._attr_unique_id = f"{account_number}_overdue_balance"
 
     def _handle_coordinator_update(self) -> None:
@@ -171,7 +173,7 @@ class SevernTrentYesterdayUsageSensor(SevernTrentBaseSensor):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Yesterday Usage"
+        self._attr_name = "Yesterday Usage"
         self._attr_unique_id = f"{account_number}_yesterday_usage"
 
     def _handle_coordinator_update(self) -> None:
@@ -197,7 +199,7 @@ class SevernTrentAverageDailyUsageSensor(SevernTrentBaseSensor):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Daily Average"
+        self._attr_name = "Daily Average"
         self._attr_unique_id = f"{account_number}_daily_average"
 
         self._attr_native_unit_of_measurement = UnitOfVolume.CUBIC_METERS
@@ -228,7 +230,7 @@ class SevernTrentWeekToDateSensor(SevernTrentBaseSensor):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Week to Date"
+        self._attr_name = "Week to Date"
         self._attr_unique_id = f"{account_number}_week_to_date"
 
     def _handle_coordinator_update(self) -> None:
@@ -257,7 +259,7 @@ class SevernTrentPreviousWeekSensor(SevernTrentBaseSensor):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Previous Week"
+        self._attr_name = "Previous Week"
         self._attr_unique_id = f"{account_number}_previous_week"
 
     def _handle_coordinator_update(self) -> None:
@@ -286,7 +288,7 @@ class SevernTrentMeterReadingSensor(SevernTrentBaseSensor):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Meter Reading"
+        self._attr_name = "Meter Reading"
         self._attr_unique_id = f"{account_number}_meter_reading"
 
     def _handle_coordinator_update(self) -> None:
@@ -325,7 +327,7 @@ class SevernTrentEstimatedMeterReadingSensor(SevernTrentBaseSensor):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Estimated Meter Reading"
+        self._attr_name = "Estimated Meter Reading"
         self._attr_unique_id = f"{account_number}_estimated_meter_reading"
 
     def _handle_coordinator_update(self) -> None:
@@ -413,7 +415,7 @@ class SevernTrentRateLimitRemainingSensor(SevernTrentBaseSensor):
         account_number: str,
     ) -> None:
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent API Rate Limit Remaining"
+        self._attr_name = "API Rate Limit Remaining"
         self._attr_unique_id = f"{account_number}_api_rate_limit_remaining"
         self._attr_native_unit_of_measurement = "points"
 
@@ -445,7 +447,7 @@ class SevernTrentMarketSupplyPointIdSensor(_SevernTrentMeterInfoBase):
 
     def __init__(self, coordinator: DataUpdateCoordinator, account_number: str) -> None:
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Market Supply Point ID"
+        self._attr_name = "Market Supply Point ID"
         self._attr_unique_id = f"{account_number}_market_supply_point_id"
 
     def _handle_coordinator_update(self) -> None:
@@ -460,7 +462,7 @@ class SevernTrentDeviceIdSensor(_SevernTrentMeterInfoBase):
 
     def __init__(self, coordinator: DataUpdateCoordinator, account_number: str) -> None:
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Device ID"
+        self._attr_name = "Device ID"
         self._attr_unique_id = f"{account_number}_device_id"
 
     def _handle_coordinator_update(self) -> None:
@@ -475,7 +477,7 @@ class SevernTrentCapabilityTypeSensor(_SevernTrentMeterInfoBase):
 
     def __init__(self, coordinator: DataUpdateCoordinator, account_number: str) -> None:
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Meter Capability"
+        self._attr_name = "Meter Capability"
         self._attr_unique_id = f"{account_number}_capability_type"
 
     def _handle_coordinator_update(self) -> None:
@@ -499,7 +501,7 @@ class SevernTrentPaymentAmountSensor(SevernTrentBaseSensor):
         account_number: str,
     ) -> None:
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Payment Amount"
+        self._attr_name = "Payment Amount"
         self._attr_unique_id = f"{account_number}_payment_amount"
 
     def _handle_coordinator_update(self) -> None:
@@ -534,7 +536,7 @@ class SevernTrentMeterDigitsSensor(_SevernTrentMeterDetailsBase):
 
     def __init__(self, coordinator: DataUpdateCoordinator, account_number: str) -> None:
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Meter Digits"
+        self._attr_name = "Meter Digits"
         self._attr_unique_id = f"{account_number}_meter_digits"
 
     def _handle_coordinator_update(self) -> None:
@@ -552,7 +554,7 @@ class SevernTrentLatestManualReadingMetaSensor(_SevernTrentMeterDetailsBase):
 
     def __init__(self, coordinator: DataUpdateCoordinator, account_number: str) -> None:
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Latest Reading Meta"
+        self._attr_name = "Latest Reading Meta"
         self._attr_unique_id = f"{account_number}_latest_reading_meta"
 
     def _handle_coordinator_update(self) -> None:
@@ -585,7 +587,7 @@ class SevernTrentOutstandingPaymentSensor(SevernTrentBaseSensor):
         account_number: str,
     ) -> None:
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Outstanding Payment"
+        self._attr_name = "Outstanding Payment"
         self._attr_unique_id = f"{account_number}_outstanding_payment"
 
     def _handle_coordinator_update(self) -> None:
@@ -618,7 +620,7 @@ class SevernTrentNextPaymentAmountSensor(_SevernTrentNextPaymentBase):
         account_number: str,
     ) -> None:
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Next Payment Amount"
+        self._attr_name = "Next Payment Amount"
         self._attr_unique_id = f"{account_number}_next_payment_amount"
 
     def _handle_coordinator_update(self) -> None:
@@ -644,7 +646,7 @@ class SevernTrentNextPaymentDateSensor(_SevernTrentNextPaymentBase):
         account_number: str,
     ) -> None:
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Next Payment Date"
+        self._attr_name = "Next Payment Date"
         self._attr_unique_id = f"{account_number}_next_payment_date"
 
     def _handle_coordinator_update(self) -> None:
@@ -678,7 +680,7 @@ class SevernTrentSmartMeterStatusSensor(SevernTrentBaseSensor):
         account_number: str,
     ) -> None:
         super().__init__(coordinator, account_number)
-        self._attr_name = "Severn Trent Smart Meter Status"
+        self._attr_name = "Smart Meter Status"
         self._attr_unique_id = f"{account_number}_smart_meter_status"
 
     def _handle_coordinator_update(self) -> None:

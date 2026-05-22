@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fix**: Replaced all `datetime.utcnow()` calls with `datetime.now(timezone.utc)` (5 occurrences)
   - `datetime.utcnow()` is deprecated in Python 3.12+
   - Prevents `DeprecationWarning` errors when running with `-W error::DeprecationWarning`
+- **Fix**: Invalid `ReadingFrequencyType` enum value in daily readings retry
+  - Changed `"DAY"` → `"DAILY"` to match the Kraken GraphQL schema
+  - The API returned `400 Bad Request: Value 'DAY' does not exist in 'ReadingFrequencyType' enum`
+  - This caused the retry fallback to fail when `DAY_INTERVAL` returned no data
 
 ### Added
 - **New Sensor**: `sensor.severn_trent_overdue_balance` – Shows overdue account balance separately
@@ -32,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Balance sensor now includes `overdue_balance_gbp` and `overdue_balance_pence` as extra state attributes
+- Added `_attr_has_entity_name = True` to base sensor for proper HA entity naming
+  - Entity names are now relative to device name (e.g. "Balance" instead of "Severn Trent Balance")
+  - HA displays as "Severn Trent Water (A-1234A123) Balance" — no more redundant "Severn Trent" prefix
+  - New sensors get clean entity IDs like `sensor.severn_trent_overdue_balance` instead of long prefixed IDs
+  - Existing entity IDs are preserved by HA (no breaking change for automations)
 
 ### [1.5.2] - 2026-01-20
 -- bump version to fix an issue with home asisstant
@@ -122,7 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Switched authentication to a browser token → API key flow
-- Added reauthentication support for refreshing the API key
+- Added re-authentication support for refreshing the API key
 
 ## [1.2.0] - 2024-XX-XX
 

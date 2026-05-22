@@ -379,7 +379,7 @@ class SevernTrentAPI:
             if not measurements:
                 _LOGGER.warning(
                     "No daily measurements returned for DAY_INTERVAL (MSPID=%s, DeviceID=%s); "
-                    "retrying with readingFrequencyType=DAY",
+                    "retrying with readingFrequencyType=DAILY",
                     self.market_supply_point_id, self.device_id,
                 )
                 daily_retry = self.session.post(
@@ -394,7 +394,7 @@ class SevernTrentAPI:
                             "utilityFilters": [
                                 {
                                     "waterFilters": {
-                                        "readingFrequencyType": "DAY",
+                                        "readingFrequencyType": "DAILY",
                                         "marketSupplyPointId": self.market_supply_point_id,
                                         "deviceId": self.device_id,
                                     }

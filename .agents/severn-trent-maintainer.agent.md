@@ -89,6 +89,7 @@ For each query/mutation in `const.py`:
 - **Rate limit**: `rateLimitInfo > pointsAllowanceRateLimit` (no account number required).
 - **Ledgers**: Returns `number` and `ledgerType`; filter by `SEVERN_TRENT_WATER` for water accounts.
 - **Error codes**: `KT-CT-4177` (Unauthorized), `KT-CT-1113` (Disabled GraphQL field), `KT-CT-4178` (No account found).
+- **ReadingFrequencyType enum**: Valid values: `DAILY`, `DAY_INTERVAL`, `MONTH_INTERVAL`, `HOUR_INTERVAL`, `FIFTEEN_MIN_INTERVAL`, `FIVE_MIN_INTERVAL`, `THIRTY_MIN_INTERVAL`, `QUARTER_INTERVAL`, `WEEK_INTERVAL`, `RAW_INTERVAL`, `INTERVALIZED`, `POINT_IN_TIME`. Note: `DAILY` ≠ `DAY_INTERVAL` — `DAILY` is "readings taken on a day to day basis" while `DAY_INTERVAL` is interval-based daily readings.
 
 ---
 
@@ -169,6 +170,7 @@ For each query/mutation in `const.py`:
 - **DateTime formatting**: Always use `_api_dt()` helper in `api.py` for formatting datetimes sent to the Kraken API. Never use `.isoformat() + "Z"` on timezone-aware datetimes — it produces invalid double-timezone format like `2026-05-22T00:00:00+00:00Z`.
 - **MONETARY device class**: `SensorDeviceClass.MONETARY` requires `SensorStateClass.TOTAL` or `None` — never use `SensorStateClass.MEASUREMENT`.
 - **Lazy initialization**: `requests.Session()` must not be created in `SevernTrentAPI.__init__()` because it runs in the HA event loop. Use a lazy `@property` instead.
+- **ReadingFrequencyType enum**: Valid values are `DAILY`, `DAY_INTERVAL`, `MONTH_INTERVAL`, `HOUR_INTERVAL`, `FIFTEEN_MIN_INTERVAL`, `FIVE_MIN_INTERVAL`, `THIRTY_MIN_INTERVAL`, `QUARTER_INTERVAL`, `WEEK_INTERVAL`, `RAW_INTERVAL`, `INTERVALIZED`, `POINT_IN_TIME`. Never use `"DAY"` or `"MONTH"` — they are not valid enum values.
 
 ---
 
@@ -233,3 +235,5 @@ When asked to validate endpoints:
 - **Do** use `_api_dt()` for all datetime formatting in API calls (never `.isoformat() + "Z"` on timezone-aware datetimes).
 - **Do** use `SensorStateClass.TOTAL` (not `MEASUREMENT`) for `SensorDeviceClass.MONETARY` sensors.
 - **Do** use lazy `@property` for `requests.Session` to avoid blocking the HA event loop.
+- **Do** use valid `ReadingFrequencyType` enum values (`DAILY`, `DAY_INTERVAL`, `MONTH_INTERVAL`, etc.) — never `"DAY"` or `"MONTH"`.
+- **Do** set `_attr_has_entity_name = True` on the base sensor and use relative entity names (e.g. `"Balance"` not `"Severn Trent Balance"`). HA prefixes the device name automatically.
