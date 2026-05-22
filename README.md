@@ -282,10 +282,10 @@ For issues, questions, or feature requests, please open an issue on GitHub.
 ## Changelog
 
 ### v1.5.2
--- bump version to fix an issue with home asisstant
+-- bump version to fix an issue with home assistant
 
 ### v1.5.1
--- Update user docs to help explain the authenticaiton tocken retrival process
+-- Update user docs to help explain the authentication token retrieval process
 
 ### v1.5.0
 -- Thanks to @RobXYZ the sensors are now part of a meter device.
@@ -293,7 +293,7 @@ For issues, questions, or feature requests, please open an issue on GitHub.
 ### v1.4.1
 - **Critical Fix**: Previous week sensor now shows correct values
   - Fixed data fetching to cover complete previous week
-  - Resolves issue where weekly usage was underreported
+  - Resolves issue where weekly usage was under-reported
 
 ### v1.4.0
 - **Breaking Change**: Replaced "Weekly Total" sensor with "Week to Date" (Monday-present)
@@ -309,7 +309,7 @@ For issues, questions, or feature requests, please open an issue on GitHub.
 
 ### v1.3.0
 - Switched authentication to a browser token -> API key flow
-- Added reauthentication support for refreshing the API key
+- Added re-authentication support for refreshing the API key
 
 ### v1.2.0
 - Added estimated current meter reading sensor

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import requests
@@ -970,7 +970,7 @@ class SevernTrentAPI:
 
         try:
             headers = {"Authorization": self.token}
-            active_from = datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+            active_from = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
             response = self.session.post(
                 API_URL,
