@@ -46,10 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Existing entity IDs are preserved by HA (no breaking change for automations)
 
 ### [1.5.2] - 2026-01-20
--- bump version to fix an issue with home asisstant
+-- bump version to fix an issue with home assistant
 
 ## [1.5.1] - 2026-01-18
-- Update user documentation for retrival of the authenticaiton token from chrome dev tools
+- Update user documentation for retrieval of the authentication token from chrome dev tools
 
 ## [1.5.0] - 2026-01-17
 - Thanks to @RobXYZ the sensors are now part of a meter device.
@@ -75,14 +75,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed `MEASUREMENT` state class which is incompatible with `WATER` device class
   - Sensor now correctly represents an average rate without statistics tracking
   - Resolves Home Assistant warning about impossible state class configuration
-- **Critical Fix**: Changed from hourly to daily data fetching to match website behavior
+- **Critical Fix**: Changed from hourly to daily data fetching to match website behaviour
   - Now uses `DAY_INTERVAL` instead of `HOUR_INTERVAL` for daily readings
   - Eliminates potential data discrepancies from hourly aggregation
-  - Matches exact API behavior used by Severn Trent website
+  - Matches exact API behaviour used by Severn Trent website
   - Should resolve remaining value mismatches between integration and website
 - **Critical Fix**: Yesterday's usage now shows correct date
   - Changed from using most recent date in response to calculating yesterday as (today - 1 day)
-  - Matches website behavior which explicitly fetches data for yesterday's date
+  - Matches website behaviour which explicitly fetches data for yesterday's date
   - Resolves issue where today's partial data was shown instead of yesterday's complete day
 
 ## [1.4.0] - 2026-01-17
