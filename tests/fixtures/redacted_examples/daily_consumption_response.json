@@ -1,5 +1,5 @@
 {
-  "routeName": "your_usage",
+  "routeName": "daily_consumption",
   "dailyUsageData": [
     {
       "date": "2099-01-13",

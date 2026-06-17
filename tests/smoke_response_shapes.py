@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 import importlib.util
 import json
 from pathlib import Path
@@ -53,6 +54,14 @@ class _Session:
             return _Response(_fixture("meter_discovery_response.json"))
         if "current-consumption" in url:
             return _Response(_fixture("current_consumption_response.json"))
+        if "daily-consumption" in url:
+            assert params["meterReference"] == "METER-REDACTED"
+            assert params["startDate"] == "2026-06-01"
+            assert params["endDate"] == "2026-06-17"
+            assert params["moveInDate"] == "2099-06-25"
+            assert params["moveOutDate"] == "2026-06-17"
+            assert params["timePeriod"] == 1
+            return _Response(_fixture("daily_usage_object_response.json"))
         return _Response(_fixture("monthly_summary_list_response.json"))
 
 
@@ -64,7 +73,11 @@ async def _main() -> None:
     api = _load_api_module()
 
     daily = api.parse_daily_consumption_response(_fixture("daily_usage_object_response.json"))
-    assert daily[0]["value_m3"] == 0.123
+    assert daily[-1]["value_m3"] == 0.239
+    daily_summary = api.parse_daily_consumption_summary(
+        _fixture("daily_usage_object_response.json")
+    )
+    assert daily_summary["total_litres"] == 2438
 
     monthly = api.parse_monthly_consumption_response(
         _fixture("monthly_summary_list_response.json")
@@ -82,9 +95,15 @@ async def _main() -> None:
         "TOKEN-REDACTED",
         account_reference="ACCOUNT-REDACTED",
     )
-    summary = await client.async_fetch_usage_summary()
+    summary = await client.async_fetch_usage_summary(today=date(2026, 6, 17))
+    assert summary["yesterday_usage_litres"] == 239
+    assert summary["today_usage_litres"] is None
+    assert summary["week_to_date_litres"] == 455
+    assert summary["previous_week_litres"] == 1373
+    assert summary["daily_average_litres"] == 217.0
     assert summary["month_to_date_litres"] == 2438
     assert summary["estimated_day_count"] == 0
+    assert summary["missing_day_count"] == 0
     assert summary["status"] == "ok"
 
     try:

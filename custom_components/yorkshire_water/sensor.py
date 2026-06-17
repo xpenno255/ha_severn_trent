@@ -44,6 +44,7 @@ def _period_attrs(
         "last_successful_update": data.get("last_successful_update"),
         "latest_data_date": data.get("latest_data_date"),
         "latest_update_date": data.get("latest_update_date"),
+        "included_day_count": data.get("included_day_count"),
         "estimated_day_count": data.get("estimated_day_count"),
         "missing_day_count": data.get("missing_day_count"),
         "total_cost": data.get("total_cost"),
@@ -109,6 +110,7 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
             "last_successful_update": data.get("last_successful_update"),
             "latest_data_date": data.get("latest_data_date"),
             "latest_update_date": data.get("latest_update_date"),
+            "included_day_count": data.get("included_day_count"),
             "estimated_day_count": data.get("estimated_day_count"),
             "missing_day_count": data.get("missing_day_count"),
             "total_cost": data.get("total_cost"),
@@ -202,6 +204,7 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
         attrs_fn=lambda data: {
             "latest_data_date": data.get("latest_data_date"),
             "latest_update_date": data.get("latest_update_date"),
+            "included_day_count": data.get("included_day_count"),
             "estimated_day_count": data.get("estimated_day_count"),
             "missing_day_count": data.get("missing_day_count"),
             "last_successful_update": data.get("last_successful_update"),

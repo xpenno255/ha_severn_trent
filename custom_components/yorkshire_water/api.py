@@ -13,6 +13,7 @@ from .const import (
     YORKSHIRE_WATER_API_BASE_URL,
     YORKSHIRE_WATER_CURRENT_CONSUMPTION_ENDPOINT_PATH,
     YORKSHIRE_WATER_CURRENT_CONSUMPTION_PATH,
+    YORKSHIRE_WATER_DAILY_CONSUMPTION_ENDPOINT_PATH,
     YORKSHIRE_WATER_DAILY_CONSUMPTION_PATH,
     YORKSHIRE_WATER_METER_DETAILS_ENDPOINT_PATH,
     YORKSHIRE_WATER_MONTHLY_CONSUMPTION_PATH,
@@ -260,71 +261,115 @@ def parse_daily_consumption_response(data: dict[str, Any]) -> list[dict[str, Any
             f"{_json_type_name(raw_items)}"
         )
 
-    normalized: list[dict[str, Any]] = []
-    for item in raw_items:
-        if not isinstance(item, dict):
-            raise YorkshireWaterSchemaError(
-                "Unexpected Yorkshire Water response shape for your_usage: "
-                f"{_json_type_name(item)}"
-            )
-        start_value = _first_present(item, "startDate", "start_date", "date")
-        end_value = _first_present(item, "endDate", "end_date") or start_value
-        value = _first_present(
+    return [_daily_usage_item_to_period(item) for item in raw_items]
+
+
+def parse_daily_consumption_summary(data: dict[str, Any]) -> dict[str, Any]:
+    """Parse daily consumption response totals and normalized periods."""
+    _ensure_response_shape("daily_consumption", data, dict)
+    periods = [
+        _period_from_normalized_dict(item)
+        for item in parse_daily_consumption_response(data)
+    ]
+    return {
+        "daily_periods": periods,
+        "included_day_count": len(periods),
+        "total_litres": _coerce_optional_float(data.get("totalLitres")),
+        "total_cost": _coerce_optional_float(data.get("totalCost")),
+        "clean_water_cost": _coerce_optional_float(
+            data.get("totalStandardTariffCleanWaterCost")
+        ),
+        "sewerage_cost": _coerce_optional_float(data.get("totalStandardTariffSewerageCost")),
+        "daily_litres_average": _coerce_optional_float(data.get("dailyLitresAverage")),
+        "daily_cost_average_for_year": _coerce_optional_float(
+            data.get("dailyCostAverageForYear")
+        ),
+    }
+
+
+def _daily_usage_item_to_period(item: Any) -> dict[str, Any]:
+    """Normalize one daily usage row."""
+    if not isinstance(item, dict):
+        raise YorkshireWaterSchemaError(
+            "Unexpected Yorkshire Water response shape for your_usage: "
+            f"{_json_type_name(item)}"
+        )
+    start_value = _first_present(item, "startDate", "start_date", "date")
+    end_value = _first_present(item, "endDate", "end_date") or start_value
+    value = _first_present(
+        item,
+        "totalConsumptionLitres",
+        "total_consumption_litres",
+        "value",
+        "usage",
+        "consumption",
+    )
+    unit = _first_present(item, "unit", "uom", "unitOfMeasure") or (
+        "litres"
+        if _first_present(item, "totalConsumptionLitres", "total_consumption_litres")
+        is not None
+        else "m3"
+    )
+    volume = _normalise_optional_volume(value, unit)
+    return {
+        "start": _parse_date(start_value).isoformat() if start_value else None,
+        "end": _parse_date(end_value).isoformat() if end_value else None,
+        "value_m3": round(volume, 3) if volume is not None else None,
+        "estimated": _first_present(
             item,
-            "totalConsumptionLitres",
-            "total_consumption_litres",
-            "value",
-            "usage",
-            "consumption",
-        )
-        unit = _first_present(item, "unit", "uom", "unitOfMeasure") or (
-            "litres"
-            if _first_present(item, "totalConsumptionLitres", "total_consumption_litres")
-            is not None
-            else "m3"
-        )
-        volume = _normalise_optional_volume(value, unit)
-        normalized.append(
-            {
-                "start": _parse_date(start_value).isoformat() if start_value else None,
-                "end": _parse_date(end_value).isoformat() if end_value else None,
-                "value_m3": round(volume, 3) if volume is not None else None,
-                "estimated_day_count": _first_present(
-                    item,
-                    "estimatedDayCount",
-                    "estimated_day_count",
-                ),
-                "missing_day_count": _first_present(
-                    item,
-                    "missingDayCount",
-                    "missing_day_count",
-                ),
-                "source": item.get("source"),
-                "freshness": item.get("freshness") or item.get("lastUpdated"),
-                "total_cost": _first_present(
-                    item,
-                    "totalCostIncludingSewerage",
-                    "total_cost_including_sewerage",
-                    "totalCost",
-                    "total_cost",
-                ),
-                "clean_water_cost": _first_present(
-                    item,
-                    "standardTariffCleanWaterCost",
-                    "standard_tariff_clean_water_cost",
-                    "cleanWaterCost",
-                    "clean_water_cost",
-                ),
-                "sewerage_cost": _first_present(
-                    item,
-                    "standardTariffSewerageCost",
-                    "standard_tariff_sewerage_cost",
-                    "sewerageCost",
-                    "sewerage_cost",
-                ),
-            }
-        )
-    return normalized
+            "isEstimatedConsumption",
+            "is_estimated_consumption",
+            "estimated",
+            "isEstimated",
+            "is_estimated",
+        ),
+        "missing": _first_present(
+            item,
+            "isMissingConsumption",
+            "is_missing_consumption",
+            "missing",
+            "isMissing",
+            "is_missing",
+        ),
+        "continuous_flow_alarm": _first_present(
+            item,
+            "continuousFlowAlarm",
+            "continuous_flow_alarm",
+        ),
+        "estimated_day_count": _first_present(
+            item,
+            "estimatedDayCount",
+            "estimated_day_count",
+        ),
+        "missing_day_count": _first_present(
+            item,
+            "missingDayCount",
+            "missing_day_count",
+        ),
+        "source": item.get("source"),
+        "freshness": item.get("lastUpdated"),
+        "total_cost": _first_present(
+            item,
+            "totalCostIncludingSewerage",
+            "total_cost_including_sewerage",
+            "totalCost",
+            "total_cost",
+        ),
+        "clean_water_cost": _first_present(
+            item,
+            "standardTariffCleanWaterCost",
+            "standard_tariff_clean_water_cost",
+            "cleanWaterCost",
+            "clean_water_cost",
+        ),
+        "sewerage_cost": _first_present(
+            item,
+            "standardTariffSewerageCost",
+            "standard_tariff_sewerage_cost",
+            "sewerageCost",
+            "sewerage_cost",
+        ),
+    }
 
 
 def parse_monthly_consumption_response(data: JsonPayload) -> list[dict[str, Any]]:
@@ -550,7 +595,39 @@ class YorkshireWaterAPI:
         _ensure_response_shape("your_usage", payload, (dict, list))
         return payload
 
-    async def async_fetch_usage_summary(self) -> dict[str, Any]:
+    async def async_get_daily_consumption(
+        self,
+        meter_reference: str,
+        *,
+        start_date: date | str,
+        end_date: date | str,
+        move_in_date: date | str,
+        move_out_date: date | str,
+        time_period: int = 1,
+    ) -> dict[str, Any]:
+        """Fetch daily consumption for a meter reference."""
+        payload = await self._async_request_json(
+            "GET",
+            YORKSHIRE_WATER_DAILY_CONSUMPTION_ENDPOINT_PATH,
+            endpoint_label="daily_consumption",
+            params={
+                "meterReference": meter_reference,
+                "startDate": _date_param(start_date),
+                "endDate": _date_param(end_date),
+                "moveInDate": _date_param(move_in_date),
+                "moveOutDate": _date_param(move_out_date),
+                "timePeriod": time_period,
+            },
+        )
+        _ensure_response_shape("daily_consumption", payload, dict)
+        summary = parse_daily_consumption_summary(payload)
+        _LOGGER.debug(
+            "Yorkshire Water API parsed: daily_consumption daily_row_count=%s",
+            len(summary["daily_periods"]),
+        )
+        return summary
+
+    async def async_fetch_usage_summary(self, today: date | None = None) -> dict[str, Any]:
         """Fetch and summarize current Yorkshire Water usage data."""
         if not self._session_token:
             raise YorkshireWaterEndpointNotConfiguredError(
@@ -559,11 +636,15 @@ class YorkshireWaterAPI:
 
         meter_reference = self.meter_reference
         meter_details: list[dict[str, Any]] = []
+        move_in_date: date | str | None = None
+        move_out_date: date | str | None = None
         if not meter_reference and self.account_reference:
             meter_payload = await self.async_get_meter_details(self.account_reference)
             meter_details = meter_payload.get("meters", [])
             if meter_details:
                 meter_reference = meter_details[0].get("meter_reference")
+                move_in_date = meter_details[0].get("start_date")
+                move_out_date = meter_details[0].get("end_date")
 
         if not meter_reference:
             raise YorkshireWaterEndpointNotConfiguredError(
@@ -571,17 +652,24 @@ class YorkshireWaterAPI:
             )
 
         current_reading = await self.async_get_current_consumption(meter_reference)
+        today = today or date.today()
+        month_start = today.replace(day=1)
+        daily_summary = await self.async_get_daily_consumption(
+            meter_reference,
+            start_date=month_start,
+            end_date=today,
+            move_in_date=move_in_date or month_start,
+            move_out_date=move_out_date or today,
+        )
         usage_payload = await self.async_get_your_usage(meter_reference)
-        daily_periods = _extract_usage_periods(usage_payload, "daily")
+        daily_periods = daily_summary["daily_periods"]
         monthly_periods = _extract_usage_periods(usage_payload, "monthly")
         yearly_periods = _extract_usage_periods(usage_payload, "yearly")
 
-        today = date.today()
         yesterday = today - timedelta(days=1)
         week_start = today - timedelta(days=today.weekday())
         previous_week_start = week_start - timedelta(days=7)
         previous_week_end = week_start - timedelta(days=1)
-        month_start = today.replace(day=1)
         year_start = today.replace(month=1, day=1)
 
         by_start = {period["start_date"]: period for period in daily_periods}
@@ -590,10 +678,23 @@ class YorkshireWaterAPI:
             key=lambda item: item["start_date"],
             reverse=True,
         )
-        last_seven = [
+        last_seven = sorted(
+            [
+                period
+                for period in daily_periods
+                if period["value_litres"] is not None
+                and period["start_date"] <= yesterday
+            ],
+            key=lambda item: item["start_date"],
+        )[-7:]
+        week_end = min(
+            today,
+            max((period["start_date"] for period in daily_periods), default=today),
+        )
+        week_periods = [
             period
             for period in daily_periods
-            if today - timedelta(days=7) <= period["start_date"] < today
+            if week_start <= period["start_date"] <= week_end
         ]
 
         def sum_range(start: date, end: date) -> float | None:
@@ -610,14 +711,14 @@ class YorkshireWaterAPI:
         yesterday_period = by_start.get(yesterday)
         today_period = by_start.get(today)
         latest_period = max(daily_periods, key=lambda item: item["end_date"], default=None)
-        estimated_day_count = (
-            _sum_period_count(daily_periods + monthly_periods, "estimated_day_count")
-            or sum(1 for period in daily_periods if period.get("estimated"))
-        )
-        missing_day_count = (
-            _sum_period_count(daily_periods + monthly_periods, "missing_day_count")
-            or _count_missing_days(daily_periods)
-        )
+        estimated_day_count = _sum_period_count(
+            daily_periods,
+            "estimated_day_count",
+        ) or _count_period_flag(daily_periods, "estimated")
+        missing_day_count = _sum_period_count(
+            daily_periods,
+            "missing_day_count",
+        ) or _count_period_flag(daily_periods, "missing")
         latest_update = _find_first_key(
             usage_payload,
             "latestUpdateDate",
@@ -639,21 +740,24 @@ class YorkshireWaterAPI:
             "today_start": today.isoformat(),
             "today_end": today.isoformat(),
             "daily_average_litres": round(
-                sum(period["value_litres"] for period in last_seven if period["value_litres"] is not None)
-                / len([period for period in last_seven if period["value_litres"] is not None]),
+                sum(period["value_litres"] for period in last_seven)
+                / len(last_seven),
                 2,
             )
-            if any(period["value_litres"] is not None for period in last_seven)
+            if last_seven
             else None,
-            "daily_average_period_start": (today - timedelta(days=7)).isoformat(),
-            "daily_average_period_end": yesterday.isoformat(),
-            "week_to_date_litres": sum_range(week_start, today),
+            "daily_average_period_start": last_seven[0]["start"] if last_seven else None,
+            "daily_average_period_end": last_seven[-1]["end"] if last_seven else None,
+            "week_to_date_litres": _total_from_periods(week_periods),
             "week_start": week_start.isoformat(),
             "previous_week_litres": sum_range(previous_week_start, previous_week_end),
             "previous_week_start": previous_week_start.isoformat(),
             "previous_week_end": previous_week_end.isoformat(),
-            "month_to_date_litres": _total_from_periods(monthly_periods)
-            or sum_range(month_start, today),
+            "month_to_date_litres": _first_non_none(
+                daily_summary.get("total_litres"),
+                _monthly_total_for_month(monthly_periods, today),
+                sum_range(month_start, today),
+            ),
             "month_start": month_start.isoformat(),
             "year_to_date_litres": _total_from_periods(yearly_periods)
             or sum_range(year_start, today),
@@ -661,18 +765,21 @@ class YorkshireWaterAPI:
             "meter_reading_m3": current_reading.get("meter_reading_m3"),
             "meter_reading_estimated": current_reading.get("estimated"),
             "meter_reading_date": current_reading.get("reading_date"),
-            "continuous_flow_alarm": _first_present(
-                current_reading,
-                "continuous_flow_alarm",
-                "continuousFlowAlarm",
-                "continuous_flow",
-            )
-            or _first_present(
-                usage_payload if isinstance(usage_payload, dict) else {},
-                "continuousFlowAlarm",
-                "continuous_flow_alarm",
-                "continuousFlowStatus",
-                "continuous_flow_status",
+            "continuous_flow_alarm": _first_non_none(
+                _first_present(
+                    current_reading,
+                    "continuous_flow_alarm",
+                    "continuousFlowAlarm",
+                    "continuous_flow",
+                ),
+                _any_period_flag(daily_periods, "continuous_flow_alarm"),
+                _first_present(
+                    usage_payload if isinstance(usage_payload, dict) else {},
+                    "continuousFlowAlarm",
+                    "continuous_flow_alarm",
+                    "continuousFlowStatus",
+                    "continuous_flow_status",
+                ),
             ),
             "data_latest_update_status": _first_present(
                 current_reading,
@@ -688,15 +795,21 @@ class YorkshireWaterAPI:
             ),
             "latest_data_date": latest_period["end"] if latest_period else None,
             "latest_update_date": latest_update,
+            "included_day_count": daily_summary.get("included_day_count"),
             "estimated_day_count": estimated_day_count,
             "missing_day_count": missing_day_count,
-            "total_cost": _find_first_key(usage_payload, "totalCost", "total_cost"),
-            "clean_water_cost": _find_first_key(
-                usage_payload,
-                "cleanWaterCost",
-                "clean_water_cost",
+            "total_cost": _first_non_none(
+                daily_summary.get("total_cost"),
+                _find_first_key(usage_payload, "totalCost", "total_cost"),
             ),
-            "sewerage_cost": _find_first_key(usage_payload, "sewerageCost", "sewerage_cost"),
+            "clean_water_cost": _first_non_none(
+                daily_summary.get("clean_water_cost"),
+                _find_first_key(usage_payload, "cleanWaterCost", "clean_water_cost"),
+            ),
+            "sewerage_cost": _first_non_none(
+                daily_summary.get("sewerage_cost"),
+                _find_first_key(usage_payload, "sewerageCost", "sewerage_cost"),
+            ),
             "meter_configured": bool(self.meter_reference),
             "account_configured": bool(self.account_reference),
             "last_successful_update": datetime.now().isoformat(timespec="seconds"),
@@ -798,6 +911,7 @@ class YorkshireWaterAPI:
                 timeout=30,
             ) as response:
                 await self._raise_for_status(response)
+                status = response.status
                 payload = await response.json(content_type=None)
         except ClientError as err:
             raise YorkshireWaterError(f"Error communicating with Yorkshire Water: {err}") from err
@@ -808,8 +922,9 @@ class YorkshireWaterAPI:
                 f"{endpoint_label}: {_json_type_name(payload)}"
             )
         _LOGGER.debug(
-            "Yorkshire Water API response: %s top_level=%s",
+            "Yorkshire Water API response: %s status=%s top_level=%s",
             endpoint_label,
+            status,
             _json_type_name(payload),
         )
         return payload
@@ -983,6 +1098,17 @@ def _parse_optional_datetime(value: Any) -> str | None:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
 
 
+def _date_param(value: date | str) -> str:
+    """Return a YYYY-MM-DD query parameter value."""
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, str):
+        return _parse_date(value).isoformat()
+    raise YorkshireWaterSchemaError(f"Unsupported date parameter: {type(value).__name__}")
+
+
 def _normalise_optional_volume(value: Any, unit: Any) -> float | None:
     """Normalize an optional volume value to cubic metres."""
     if value is None:
@@ -993,6 +1119,13 @@ def _normalise_optional_volume(value: Any, unit: Any) -> float | None:
         value=float(value),
         unit=str(unit),
     ).cubic_metres
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    """Coerce an optional numeric value."""
+    if value is None:
+        return None
+    return float(value)
 
 
 def _extract_usage_periods(payload: JsonPayload, grain: str) -> list[dict[str, Any]]:
@@ -1027,6 +1160,8 @@ def _period_from_normalized_dict(item: dict[str, Any]) -> dict[str, Any]:
         if value_m3 is not None
         else None,
         "estimated": item.get("estimated"),
+        "missing": item.get("missing"),
+        "continuous_flow_alarm": item.get("continuous_flow_alarm"),
         "estimated_day_count": item.get("estimated_day_count"),
         "missing_day_count": item.get("missing_day_count"),
         "source": item.get("source"),
@@ -1142,6 +1277,15 @@ def _total_from_periods(periods: list[dict[str, Any]]) -> float | None:
     return round(sum(values), 2) if values else None
 
 
+def _monthly_total_for_month(periods: list[dict[str, Any]], today: date) -> float | None:
+    """Return the current month total from monthly summary periods only."""
+    current_month = f"{today.month:02d}"
+    for period in periods:
+        if str(period.get("month") or "").zfill(2) == current_month:
+            return period.get("value_litres")
+    return None
+
+
 def _count_missing_days(periods: list[dict[str, Any]]) -> int:
     """Count missing days between the first and latest daily usage period."""
     dated = sorted({period["start_date"] for period in periods if period["start_date"] != date.min})
@@ -1161,6 +1305,19 @@ def _sum_period_count(periods: list[dict[str, Any]], key: str) -> int:
     return total
 
 
+def _count_period_flag(periods: list[dict[str, Any]], key: str) -> int:
+    """Count truthy boolean flags from normalized periods."""
+    return sum(1 for period in periods if period.get(key) is True)
+
+
+def _any_period_flag(periods: list[dict[str, Any]], key: str) -> bool | None:
+    """Return True if any period has a truthy flag, False if any explicit false exists."""
+    values = [period.get(key) for period in periods if period.get(key) is not None]
+    if not values:
+        return None
+    return any(values)
+
+
 def _usage_period_as_dict(period: dict[str, Any]) -> dict[str, Any]:
     """Serialize a normalized usage period for sensor attributes."""
     return {
@@ -1170,6 +1327,8 @@ def _usage_period_as_dict(period: dict[str, Any]) -> dict[str, Any]:
         "year": period.get("year"),
         "value_litres": period.get("value_litres"),
         "estimated": period.get("estimated"),
+        "missing": period.get("missing"),
+        "continuous_flow_alarm": period.get("continuous_flow_alarm"),
         "estimated_day_count": period.get("estimated_day_count"),
         "missing_day_count": period.get("missing_day_count"),
         "source": period.get("source"),
@@ -1223,4 +1382,12 @@ def _first_present(data: dict[str, Any], *keys: str) -> Any:
     for key in keys:
         if key in data:
             return data[key]
+    return None
+
+
+def _first_non_none(*values: Any) -> Any:
+    """Return the first value that is not None, preserving falsey values."""
+    for value in values:
+        if value is not None:
+            return value
     return None

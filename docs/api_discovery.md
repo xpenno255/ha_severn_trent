@@ -81,6 +81,20 @@ Observed smart meter calls:
     "auth": "Authorization: Bearer TOKEN-REDACTED"
   },
   {
+    "route_name": "daily_consumption",
+    "method": "GET",
+    "endpoint_path": "/daily-consumption",
+    "query_parameters": {
+      "meterReference": "METER-REDACTED",
+      "startDate": "REDACTED",
+      "endDate": "REDACTED",
+      "moveInDate": "REDACTED",
+      "moveOutDate": "REDACTED",
+      "timePeriod": "REDACTED"
+    },
+    "auth": "Authorization: Bearer TOKEN-REDACTED"
+  },
+  {
     "route_name": "your_usage",
     "method": "GET",
     "endpoint_path": "/your-usage",
@@ -113,6 +127,8 @@ Redacted meter discovery responses have been captured with:
 Treat sentinel dates such as `0001-01-01T00:00:00` as unset.
 
 Account summary responses contain useful account status metadata, but they may also contain sensitive billing, payment, address, and postcode data. The integration should expose only safe account status fields by default and must not expose address, postcode, balance, payment plan, payment amounts, or direct debit details.
+
+Daily consumption responses are fetched from `/daily-consumption` with query parameter names `meterReference`, `startDate`, `endDate`, `moveInDate`, `moveOutDate`, and `timePeriod`. Redact all query values before sharing captures. The response contains `dailyUsageData` rows plus totals such as `totalLitres`, tariff cost totals, and daily averages. Redact every `meterReference` value inside response rows.
 
 ## Fields To Record
 
