@@ -49,6 +49,9 @@ class _Response:
 
 
 class _Session:
+    def __init__(self, usage_fixture: str = "monthly_summary_list_response.json") -> None:
+        self.usage_fixture = usage_fixture
+
     def request(self, method, url, headers=None, params=None, timeout=None):
         if "meter-details" in url:
             return _Response(_fixture("meter_discovery_response.json"))
@@ -62,7 +65,7 @@ class _Session:
             assert params["moveOutDate"] == "2026-06-17"
             assert params["timePeriod"] == 1
             return _Response(_fixture("daily_usage_object_response.json"))
-        return _Response(_fixture("monthly_summary_list_response.json"))
+        return _Response(_fixture(self.usage_fixture))
 
 
 def _fixture(name: str):
@@ -98,13 +101,38 @@ async def _main() -> None:
     summary = await client.async_fetch_usage_summary(today=date(2026, 6, 17))
     assert summary["yesterday_usage_litres"] == 239
     assert summary["today_usage_litres"] is None
+    assert summary["today_status_detail"] == "latest_available_usage_data_is_2026-06-16"
     assert summary["week_to_date_litres"] == 455
     assert summary["previous_week_litres"] == 1373
     assert summary["daily_average_litres"] == 217.0
     assert summary["month_to_date_litres"] == 2438
+    assert summary["year_to_date_litres"] is None
+    assert summary["data_latest_update_status"] is not None
+    assert summary["yesterday_included_day_count"] == 1
+    assert summary["today_included_day_count"] == 0
+    assert summary["daily_average_included_day_count"] == 7
+    assert summary["week_to_date_included_day_count"] == 2
+    assert summary["previous_week_included_day_count"] == 7
+    assert summary["month_to_date_included_day_count"] == 16
+    assert summary["daily_average_periods"][0]["start"] == "2026-06-10"
+    assert summary["daily_average_periods"][-1]["end"] == "2026-06-16"
+    assert len(summary["daily_average_periods"]) == 7
     assert summary["estimated_day_count"] == 0
     assert summary["missing_day_count"] == 0
+    assert summary["yesterday_clean_water_cost"] == 0.5
+    assert summary["month_to_date_total_cost"] == 11.27
+    assert summary["meter_reading_m3"] is None
+    assert summary["meter_reading_status"] == "not_implemented"
     assert summary["status"] == "ok"
+
+    yearly_client = api.YorkshireWaterAPI(
+        _Session("yearly_usage_object_response.json"),
+        "TOKEN-REDACTED",
+        account_reference="ACCOUNT-REDACTED",
+    )
+    yearly_summary = await yearly_client.async_fetch_usage_summary(today=date(2026, 6, 17))
+    assert yearly_summary["year_to_date_litres"] == 5432
+    assert yearly_summary["year_to_date_included_day_count"] == 2
 
     try:
         api.parse_daily_consumption_response(_fixture("monthly_summary_list_response.json"))

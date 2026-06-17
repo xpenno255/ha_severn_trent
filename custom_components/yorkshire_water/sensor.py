@@ -34,7 +34,7 @@ def _period_attrs(
     data: dict[str, Any],
     start_key: str,
     end_key: str,
-    raw_period_key: str | None = None,
+    prefix: str,
 ) -> dict[str, Any]:
     """Build common source period attributes."""
     attrs: dict[str, Any] = {
@@ -44,15 +44,14 @@ def _period_attrs(
         "last_successful_update": data.get("last_successful_update"),
         "latest_data_date": data.get("latest_data_date"),
         "latest_update_date": data.get("latest_update_date"),
-        "included_day_count": data.get("included_day_count"),
-        "estimated_day_count": data.get("estimated_day_count"),
-        "missing_day_count": data.get("missing_day_count"),
-        "total_cost": data.get("total_cost"),
-        "clean_water_cost": data.get("clean_water_cost"),
-        "sewerage_cost": data.get("sewerage_cost"),
+        "included_day_count": data.get(f"{prefix}_included_day_count"),
+        "estimated_day_count": data.get(f"{prefix}_estimated_day_count"),
+        "missing_day_count": data.get(f"{prefix}_missing_day_count"),
+        "total_cost": data.get(f"{prefix}_total_cost"),
+        "clean_water_cost": data.get(f"{prefix}_clean_water_cost"),
+        "sewerage_cost": data.get(f"{prefix}_sewerage_cost"),
     }
-    if raw_period_key:
-        attrs["source_periods"] = data.get(raw_period_key) or []
+    attrs["source_periods"] = data.get(f"{prefix}_periods") or []
     return attrs
 
 
@@ -66,7 +65,12 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
         state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=UnitOfVolume.LITERS,
         value_fn=lambda data: data.get("yesterday_usage_litres"),
-        attrs_fn=lambda data: _period_attrs(data, "yesterday_start", "yesterday_end"),
+        attrs_fn=lambda data: _period_attrs(
+            data,
+            "yesterday_start",
+            "yesterday_end",
+            "yesterday",
+        ),
     ),
     YorkshireWaterSensorEntityDescription(
         key="today_usage",
@@ -77,7 +81,10 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
         state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=UnitOfVolume.LITERS,
         value_fn=lambda data: data.get("today_usage_litres"),
-        attrs_fn=lambda data: _period_attrs(data, "today_start", "today_end"),
+        attrs_fn=lambda data: {
+            **_period_attrs(data, "today_start", "today_end", "today"),
+            "status_detail": data.get("today_status_detail"),
+        },
     ),
     YorkshireWaterSensorEntityDescription(
         key="daily_average",
@@ -91,7 +98,7 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
             data,
             "daily_average_period_start",
             "daily_average_period_end",
-            "daily_periods",
+            "daily_average",
         ),
     ),
     YorkshireWaterSensorEntityDescription(
@@ -105,17 +112,18 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
         value_fn=lambda data: data.get("week_to_date_litres"),
         attrs_fn=lambda data: {
             "source_period_start": data.get("week_start"),
-            "source_period_end": datetime.now().date().isoformat(),
+            "source_period_end": data.get("week_end") or datetime.now().date().isoformat(),
             "unit": UnitOfVolume.LITERS,
             "last_successful_update": data.get("last_successful_update"),
             "latest_data_date": data.get("latest_data_date"),
             "latest_update_date": data.get("latest_update_date"),
-            "included_day_count": data.get("included_day_count"),
-            "estimated_day_count": data.get("estimated_day_count"),
-            "missing_day_count": data.get("missing_day_count"),
-            "total_cost": data.get("total_cost"),
-            "clean_water_cost": data.get("clean_water_cost"),
-            "sewerage_cost": data.get("sewerage_cost"),
+            "included_day_count": data.get("week_to_date_included_day_count"),
+            "estimated_day_count": data.get("week_to_date_estimated_day_count"),
+            "missing_day_count": data.get("week_to_date_missing_day_count"),
+            "total_cost": data.get("week_to_date_total_cost"),
+            "clean_water_cost": data.get("week_to_date_clean_water_cost"),
+            "sewerage_cost": data.get("week_to_date_sewerage_cost"),
+            "source_periods": data.get("week_to_date_periods") or [],
         },
     ),
     YorkshireWaterSensorEntityDescription(
@@ -131,6 +139,7 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
             data,
             "previous_week_start",
             "previous_week_end",
+            "previous_week",
         ),
     ),
     YorkshireWaterSensorEntityDescription(
@@ -146,7 +155,7 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
             data,
             "month_start",
             "latest_data_date",
-            "monthly_periods",
+            "month_to_date",
         ),
     ),
     YorkshireWaterSensorEntityDescription(
@@ -162,7 +171,7 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
             data,
             "year_start",
             "latest_data_date",
-            "yearly_periods",
+            "year_to_date",
         ),
     ),
     YorkshireWaterSensorEntityDescription(
@@ -177,6 +186,7 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
         attrs_fn=lambda data: {
             "reading_date": data.get("meter_reading_date"),
             "estimated": data.get("meter_reading_estimated"),
+            "status_detail": data.get("meter_reading_status"),
             "raw_unit": UnitOfVolume.CUBIC_METERS,
             "last_successful_update": data.get("last_successful_update"),
         },

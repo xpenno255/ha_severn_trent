@@ -711,6 +711,16 @@ class YorkshireWaterAPI:
         yesterday_period = by_start.get(yesterday)
         today_period = by_start.get(today)
         latest_period = max(daily_periods, key=lambda item: item["end_date"], default=None)
+        yesterday_periods = [yesterday_period] if yesterday_period else []
+        today_periods = [today_period] if today_period else []
+        previous_week_periods = [
+            period
+            for period in daily_periods
+            if previous_week_start <= period["start_date"] <= previous_week_end
+        ]
+        month_periods = [
+            period for period in daily_periods if month_start <= period["start_date"] <= today
+        ]
         estimated_day_count = _sum_period_count(
             daily_periods,
             "estimated_day_count",
@@ -726,19 +736,59 @@ class YorkshireWaterAPI:
             "lastUpdated",
             "last_updated",
         )
+        latest_data_status = _first_non_none(
+            _first_present(
+                current_reading,
+                "data_latest_update_status",
+                "dataLatestUpdateStatus",
+                "latest_update_status",
+            ),
+            _first_present(
+                usage_payload if isinstance(usage_payload, dict) else {},
+                "dataLatestUpdateStatus",
+                "latest_update_status",
+                "status",
+            ),
+            f"current_to_{latest_period['end']}" if latest_period else None,
+        )
+        year_to_date_periods = yearly_periods
+        year_to_date_litres = _total_from_periods(year_to_date_periods)
 
         return {
             "daily_periods": [_usage_period_as_dict(period) for period in recent_periods],
             "monthly_periods": [_usage_period_as_dict(period) for period in monthly_periods],
             "yearly_periods": [_usage_period_as_dict(period) for period in yearly_periods],
+            "yesterday_periods": [_usage_period_as_dict(period) for period in yesterday_periods],
             "yesterday_usage_litres": yesterday_period.get("value_litres")
             if yesterday_period
             else None,
             "yesterday_start": yesterday.isoformat(),
             "yesterday_end": yesterday.isoformat(),
+            "yesterday_included_day_count": len(yesterday_periods),
+            "yesterday_estimated_day_count": _count_period_flag(yesterday_periods, "estimated"),
+            "yesterday_missing_day_count": _count_period_flag(yesterday_periods, "missing"),
+            "yesterday_total_cost": _sum_period_field(yesterday_periods, "total_cost"),
+            "yesterday_clean_water_cost": _sum_period_field(
+                yesterday_periods,
+                "clean_water_cost",
+            ),
+            "yesterday_sewerage_cost": _sum_period_field(yesterday_periods, "sewerage_cost"),
+            "today_periods": [_usage_period_as_dict(period) for period in today_periods],
             "today_usage_litres": today_period.get("value_litres") if today_period else None,
             "today_start": today.isoformat(),
             "today_end": today.isoformat(),
+            "today_status_detail": None
+            if today_period
+            else f"latest_available_usage_data_is_{latest_period['end']}"
+            if latest_period
+            else "usage_data_unavailable",
+            "today_included_day_count": len(today_periods),
+            "today_estimated_day_count": _count_period_flag(today_periods, "estimated"),
+            "today_missing_day_count": _count_period_flag(today_periods, "missing"),
+            "today_total_cost": _sum_period_field(today_periods, "total_cost"),
+            "today_clean_water_cost": _sum_period_field(today_periods, "clean_water_cost"),
+            "today_sewerage_cost": _sum_period_field(today_periods, "sewerage_cost"),
+            "daily_average_periods": [_usage_period_as_dict(period) for period in last_seven],
             "daily_average_litres": round(
                 sum(period["value_litres"] for period in last_seven)
                 / len(last_seven),
@@ -748,23 +798,95 @@ class YorkshireWaterAPI:
             else None,
             "daily_average_period_start": last_seven[0]["start"] if last_seven else None,
             "daily_average_period_end": last_seven[-1]["end"] if last_seven else None,
+            "daily_average_included_day_count": len(last_seven),
+            "daily_average_estimated_day_count": _count_period_flag(last_seven, "estimated"),
+            "daily_average_missing_day_count": _count_period_flag(last_seven, "missing"),
+            "daily_average_total_cost": _sum_period_field(last_seven, "total_cost"),
+            "daily_average_clean_water_cost": _sum_period_field(last_seven, "clean_water_cost"),
+            "daily_average_sewerage_cost": _sum_period_field(last_seven, "sewerage_cost"),
+            "week_to_date_periods": [_usage_period_as_dict(period) for period in week_periods],
             "week_to_date_litres": _total_from_periods(week_periods),
             "week_start": week_start.isoformat(),
+            "week_end": week_end.isoformat(),
+            "week_to_date_included_day_count": len(week_periods),
+            "week_to_date_estimated_day_count": _count_period_flag(week_periods, "estimated"),
+            "week_to_date_missing_day_count": _count_period_flag(week_periods, "missing"),
+            "week_to_date_total_cost": _sum_period_field(week_periods, "total_cost"),
+            "week_to_date_clean_water_cost": _sum_period_field(
+                week_periods,
+                "clean_water_cost",
+            ),
+            "week_to_date_sewerage_cost": _sum_period_field(week_periods, "sewerage_cost"),
+            "previous_week_periods": [
+                _usage_period_as_dict(period) for period in previous_week_periods
+            ],
             "previous_week_litres": sum_range(previous_week_start, previous_week_end),
             "previous_week_start": previous_week_start.isoformat(),
             "previous_week_end": previous_week_end.isoformat(),
+            "previous_week_included_day_count": len(previous_week_periods),
+            "previous_week_estimated_day_count": _count_period_flag(
+                previous_week_periods,
+                "estimated",
+            ),
+            "previous_week_missing_day_count": _count_period_flag(
+                previous_week_periods,
+                "missing",
+            ),
+            "previous_week_total_cost": _sum_period_field(previous_week_periods, "total_cost"),
+            "previous_week_clean_water_cost": _sum_period_field(
+                previous_week_periods,
+                "clean_water_cost",
+            ),
+            "previous_week_sewerage_cost": _sum_period_field(
+                previous_week_periods,
+                "sewerage_cost",
+            ),
+            "month_to_date_periods": [_usage_period_as_dict(period) for period in month_periods],
             "month_to_date_litres": _first_non_none(
                 daily_summary.get("total_litres"),
                 _monthly_total_for_month(monthly_periods, today),
                 sum_range(month_start, today),
             ),
             "month_start": month_start.isoformat(),
-            "year_to_date_litres": _total_from_periods(yearly_periods)
-            or sum_range(year_start, today),
+            "month_to_date_included_day_count": daily_summary.get("included_day_count"),
+            "month_to_date_estimated_day_count": estimated_day_count,
+            "month_to_date_missing_day_count": missing_day_count,
+            "month_to_date_total_cost": daily_summary.get("total_cost"),
+            "month_to_date_clean_water_cost": daily_summary.get("clean_water_cost"),
+            "month_to_date_sewerage_cost": daily_summary.get("sewerage_cost"),
+            "year_to_date_periods": [
+                _usage_period_as_dict(period) for period in year_to_date_periods
+            ],
+            "year_to_date_litres": year_to_date_litres,
             "year_start": year_start.isoformat(),
-            "meter_reading_m3": current_reading.get("meter_reading_m3"),
-            "meter_reading_estimated": current_reading.get("estimated"),
-            "meter_reading_date": current_reading.get("reading_date"),
+            "year_to_date_included_day_count": len(year_to_date_periods)
+            if year_to_date_litres is not None
+            else None,
+            "year_to_date_estimated_day_count": _sum_period_count(
+                year_to_date_periods,
+                "estimated_day_count",
+            )
+            if year_to_date_litres is not None
+            else None,
+            "year_to_date_missing_day_count": _sum_period_count(
+                year_to_date_periods,
+                "missing_day_count",
+            )
+            if year_to_date_litres is not None
+            else None,
+            "year_to_date_total_cost": _sum_period_field(year_to_date_periods, "total_cost"),
+            "year_to_date_clean_water_cost": _sum_period_field(
+                year_to_date_periods,
+                "clean_water_cost",
+            ),
+            "year_to_date_sewerage_cost": _sum_period_field(
+                year_to_date_periods,
+                "sewerage_cost",
+            ),
+            "meter_reading_m3": None,
+            "meter_reading_estimated": None,
+            "meter_reading_date": None,
+            "meter_reading_status": "not_implemented",
             "continuous_flow_alarm": _first_non_none(
                 _first_present(
                     current_reading,
@@ -781,18 +903,7 @@ class YorkshireWaterAPI:
                     "continuous_flow_status",
                 ),
             ),
-            "data_latest_update_status": _first_present(
-                current_reading,
-                "data_latest_update_status",
-                "dataLatestUpdateStatus",
-                "latest_update_status",
-            )
-            or _first_present(
-                usage_payload if isinstance(usage_payload, dict) else {},
-                "dataLatestUpdateStatus",
-                "latest_update_status",
-                "status",
-            ),
+            "data_latest_update_status": latest_data_status,
             "latest_data_date": latest_period["end"] if latest_period else None,
             "latest_update_date": latest_update,
             "included_day_count": daily_summary.get("included_day_count"),
@@ -1166,9 +1277,9 @@ def _period_from_normalized_dict(item: dict[str, Any]) -> dict[str, Any]:
         "missing_day_count": item.get("missing_day_count"),
         "source": item.get("source"),
         "freshness": item.get("freshness"),
-        "total_cost": item.get("total_cost"),
-        "clean_water_cost": item.get("clean_water_cost"),
-        "sewerage_cost": item.get("sewerage_cost"),
+        "total_cost": _coerce_optional_float(item.get("total_cost")),
+        "clean_water_cost": _coerce_optional_float(item.get("clean_water_cost")),
+        "sewerage_cost": _coerce_optional_float(item.get("sewerage_cost")),
     }
 
 
@@ -1234,26 +1345,32 @@ def _period_from_payload(item: dict[str, Any]) -> dict[str, Any]:
         "missing_day_count": _first_present(item, "missingDayCount", "missing_day_count"),
         "source": item.get("source"),
         "freshness": item.get("freshness") or item.get("lastUpdated"),
-        "total_cost": _first_present(
-            item,
-            "totalCostIncludingSewerage",
-            "total_cost_including_sewerage",
-            "totalCost",
-            "total_cost",
+        "total_cost": _coerce_optional_float(
+            _first_present(
+                item,
+                "totalCostIncludingSewerage",
+                "total_cost_including_sewerage",
+                "totalCost",
+                "total_cost",
+            )
         ),
-        "clean_water_cost": _first_present(
-            item,
-            "standardTariffCleanWaterCost",
-            "standard_tariff_clean_water_cost",
-            "cleanWaterCost",
-            "clean_water_cost",
+        "clean_water_cost": _coerce_optional_float(
+            _first_present(
+                item,
+                "standardTariffCleanWaterCost",
+                "standard_tariff_clean_water_cost",
+                "cleanWaterCost",
+                "clean_water_cost",
+            )
         ),
-        "sewerage_cost": _first_present(
-            item,
-            "standardTariffSewerageCost",
-            "standard_tariff_sewerage_cost",
-            "sewerageCost",
-            "sewerage_cost",
+        "sewerage_cost": _coerce_optional_float(
+            _first_present(
+                item,
+                "standardTariffSewerageCost",
+                "standard_tariff_sewerage_cost",
+                "sewerageCost",
+                "sewerage_cost",
+            )
         ),
     }
 
@@ -1303,6 +1420,16 @@ def _sum_period_count(periods: list[dict[str, Any]], key: str) -> int:
         if value is not None:
             total += int(value)
     return total
+
+
+def _sum_period_field(periods: list[dict[str, Any]], key: str) -> float | None:
+    """Sum optional numeric fields from normalized periods."""
+    values = [
+        float(period[key])
+        for period in periods
+        if period.get(key) is not None
+    ]
+    return round(sum(values), 2) if values else None
 
 
 def _count_period_flag(periods: list[dict[str, Any]], key: str) -> int:
