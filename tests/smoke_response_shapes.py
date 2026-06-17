@@ -67,6 +67,7 @@ class _Session:
             "scope": "openid css-onlineaccount-api",
         }
         self.token_requests: list[dict] = []
+        self.api_requests: list[str] = []
 
     def request(self, method, url, headers=None, params=None, data=None, timeout=None):
         if "connect/token" in url:
@@ -75,10 +76,13 @@ class _Session:
             self.token_requests.append(data)
             return _Response(self.token_payload)
         if "meter-details" in url:
+            self.api_requests.append("meter_details")
             return _Response(_fixture("meter_discovery_response.json"))
         if "current-consumption" in url:
+            self.api_requests.append("current_consumption")
             return _Response(_fixture("current_consumption_response.json"))
         if "daily-consumption" in url:
+            self.api_requests.append("daily_consumption")
             assert params["meterReference"] == "METER-REDACTED"
             assert params["startDate"] == "2026-06-01"
             assert params["endDate"] == "2026-06-17"
@@ -86,6 +90,7 @@ class _Session:
             assert params["moveOutDate"] == "2026-06-17"
             assert params["timePeriod"] == 1
             return _Response(_fixture(self.daily_fixture))
+        self.api_requests.append("your_usage")
         return _Response(_fixture(self.usage_fixture))
 
 
@@ -191,6 +196,20 @@ async def _main() -> None:
     )
     assert no_refresh_auth_data["refresh_token"] is None
     assert no_refresh_auth_data["token_metadata"]["has_refresh_token"] is False
+    fresh_reauth_data = api.build_token_auth_data(
+        token_response_json=json.dumps(
+            {
+                "id_token": "TOKEN-REDACTED",
+                "access_token": "TOKEN-REDACTED",
+                "expires_in": 900,
+                "token_type": "Bearer",
+                "scope": "openid",
+            }
+        ),
+        now=fixed_now,
+    )
+    assert fresh_reauth_data["access_token"] == "TOKEN-REDACTED"
+    assert fresh_reauth_data["token_expires_at"] == "2026-06-17T12:15:00+00:00"
 
     token_session = _Session()
     token_client = api.YorkshireWaterAPI(token_session, None)
@@ -314,6 +333,9 @@ async def _main() -> None:
     sensor_source = (ROOT / "custom_components/yorkshire_water/sensor.py").read_text()
     cumulative_block = _sensor_block(sensor_source, "estimated_cumulative_usage")
     assert "state_class=SensorStateClass.TOTAL_INCREASING" in cumulative_block
+    status_block = _sensor_block(sensor_source, "status")
+    assert '"token_status": data.get("token_status")' in status_block
+    assert '"refresh_available": data.get("refresh_available")' in status_block
     for cost_key in (
         "yesterday_cost",
         "today_cost",
@@ -340,8 +362,9 @@ async def _main() -> None:
             period_key,
         )
 
+    expired_session = _Session()
     expired_client = api.YorkshireWaterAPI(
-        _Session(),
+        expired_session,
         "TOKEN-REDACTED",
         account_reference="ACCOUNT-REDACTED",
         token_expires_at="2000-01-01T00:00:00+00:00",
@@ -353,6 +376,26 @@ async def _main() -> None:
         assert "TOKEN-REDACTED" not in str(err)
     else:
         raise AssertionError("Expected expired API token to stop before requests")
+    assert expired_session.api_requests == []
+    expired_status = api.build_expired_token_status_data(
+        account_configured=True,
+        meter_configured=False,
+        last_successful_update="2026-06-17T12:00:00",
+        latest_data_date="2026-06-16",
+        latest_update_date="2026-06-17T00:00:00+00:00",
+    )
+    assert expired_status == {
+        "status": "reauth_required",
+        "status_detail": "access_token_expired_reauth_required",
+        "token_status": "token_expired",
+        "refresh_available": False,
+        "account_configured": True,
+        "meter_configured": False,
+        "latest_data_date": "2026-06-16",
+        "latest_update_date": "2026-06-17T00:00:00+00:00",
+        "last_successful_update": "2026-06-17T12:00:00",
+    }
+    assert "TOKEN-REDACTED" not in json.dumps(expired_status)
 
     refresh_session = _Session(
         token_payload={

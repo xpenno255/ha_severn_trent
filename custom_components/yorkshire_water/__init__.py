@@ -19,6 +19,7 @@ from .api import (
     YorkshireWaterError,
     YorkshireWaterExpiredSessionError,
     YorkshireWaterRefreshUnavailableError,
+    build_expired_token_status_data,
 )
 from .const import (
     CONF_ACCOUNT_ID,
@@ -56,11 +57,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         token_expires_at=entry.data.get(CONF_TOKEN_EXPIRES_AT),
         refresh_token=entry.data.get(CONF_REFRESH_TOKEN),
     )
+    last_successful_data: dict | None = None
+    reauth_started = False
+
+    async def async_start_reauth_once() -> None:
+        """Start Home Assistant reauth once when supported by this HA version."""
+        nonlocal reauth_started
+        if reauth_started:
+            return
+        start_reauth = getattr(entry, "async_start_reauth", None)
+        if start_reauth is None:
+            return
+        reauth_started = True
+        await start_reauth(hass)
 
     async def async_update_data() -> dict:
         """Fetch data from Yorkshire Water."""
+        nonlocal last_successful_data
         try:
             data = await api.async_fetch_usage_summary()
+            last_successful_data = data
             if auth_update := api.consume_pending_auth_update():
                 hass.config_entries.async_update_entry(
                     entry,
@@ -73,23 +89,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 )
             return data
         except YorkshireWaterRefreshUnavailableError as err:
-            _LOGGER.warning("%s", err)
-            return {
-                "status": "refresh_unavailable",
-                "status_detail": "reauth_required",
-                "token_status": "refresh_unavailable",
-                "account_configured": bool(api.account_reference),
-                "meter_configured": bool(api.meter_reference),
-            }
+            _LOGGER.warning(
+                "Yorkshire Water access token expired and refresh is unavailable; "
+                "reauthentication is required"
+            )
+            await async_start_reauth_once()
+            return build_expired_token_status_data(
+                account_configured=bool(api.account_reference),
+                meter_configured=bool(api.meter_reference),
+                last_successful_update=(last_successful_data or {}).get(
+                    "last_successful_update"
+                ),
+                latest_data_date=(last_successful_data or {}).get("latest_data_date"),
+                latest_update_date=(last_successful_data or {}).get("latest_update_date"),
+            )
         except YorkshireWaterExpiredSessionError as err:
             _LOGGER.warning("%s", err)
-            return {
-                "status": "token_expired",
-                "status_detail": "temporary_bearer_token_expired",
-                "token_status": "token_expired",
-                "account_configured": bool(api.account_reference),
-                "meter_configured": bool(api.meter_reference),
-            }
+            await async_start_reauth_once()
+            return build_expired_token_status_data(
+                account_configured=bool(api.account_reference),
+                meter_configured=bool(api.meter_reference),
+                last_successful_update=(last_successful_data or {}).get(
+                    "last_successful_update"
+                ),
+                latest_data_date=(last_successful_data or {}).get("latest_data_date"),
+                latest_update_date=(last_successful_data or {}).get("latest_update_date"),
+                refresh_available=bool(api.refresh_token),
+            )
         except YorkshireWaterAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except YorkshireWaterEndpointNotConfiguredError as err:

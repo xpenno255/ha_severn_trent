@@ -305,6 +305,29 @@ def build_refresh_token_body(
     }
 
 
+def build_expired_token_status_data(
+    *,
+    account_configured: bool,
+    meter_configured: bool,
+    last_successful_update: str | None = None,
+    latest_data_date: str | None = None,
+    latest_update_date: str | None = None,
+    refresh_available: bool = False,
+) -> dict[str, Any]:
+    """Build a safe coordinator payload for an expired access token."""
+    return {
+        "status": "reauth_required",
+        "status_detail": "access_token_expired_reauth_required",
+        "token_status": "token_expired",
+        "refresh_available": refresh_available,
+        "account_configured": account_configured,
+        "meter_configured": meter_configured,
+        "latest_data_date": latest_data_date,
+        "latest_update_date": latest_update_date,
+        "last_successful_update": last_successful_update,
+    }
+
+
 def parse_account_discovery_response(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Parse a redacted account discovery response into a normalized shape."""
     _ensure_dict(data, "Account discovery payload")

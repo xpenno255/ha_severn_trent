@@ -382,6 +382,7 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
             "latest_data_date": data.get("latest_data_date"),
             "latest_update_date": data.get("latest_update_date"),
             "token_status": data.get("token_status"),
+            "refresh_available": data.get("refresh_available"),
         },
     ),
 )
