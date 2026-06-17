@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 import logging
 from typing import Any
 
@@ -97,6 +97,29 @@ class YorkshireWaterEndpointNotConfiguredError(YorkshireWaterError):
     """Yorkshire Water endpoint details have not been captured yet."""
 
 
+def parse_token_response(data: dict[str, Any]) -> dict[str, Any]:
+    """Parse OAuth token response metadata without returning raw token values."""
+    _ensure_dict(data, "Token response payload")
+
+    expires_in = data.get("expires_in")
+    try:
+        expires_in_seconds = int(expires_in)
+    except (TypeError, ValueError) as err:
+        raise YorkshireWaterSchemaError("Token response expires_in was not an integer") from err
+
+    expires_at = datetime.now(UTC) + timedelta(seconds=expires_in_seconds)
+    scope = data.get("scope")
+
+    return {
+        "has_id_token": bool(data.get("id_token")),
+        "has_access_token": bool(data.get("access_token")),
+        "expires_in": expires_in_seconds,
+        "expires_at": expires_at.isoformat(),
+        "token_type": data.get("token_type"),
+        "scope": scope.split() if isinstance(scope, str) else [],
+    }
+
+
 def parse_account_discovery_response(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Parse a redacted account discovery response into a normalized shape."""
     _ensure_dict(data, "Account discovery payload")
@@ -131,8 +154,19 @@ def parse_meter_discovery_response(data: dict[str, Any]) -> list[dict[str, Any]]
     """Parse a redacted meter discovery response into a normalized shape."""
     _ensure_dict(data, "Meter discovery payload")
 
-    # TODO: Replace these scaffold mappings once captured Yorkshire Water
-    # schemas confirm the real meter discovery fields.
+    if "accountReference" in data or "meterReference" in data:
+        return [
+            {
+                "account_reference": data.get("accountReference"),
+                "meter_reference": data.get("meterReference"),
+                "start_date": _parse_optional_datetime(data.get("startDate")),
+                "end_date": _parse_optional_datetime(data.get("endDate")),
+                "current_date": _parse_optional_datetime(data.get("currentDate")),
+            }
+        ]
+
+    # TODO: Remove this earlier scaffold shape once all discovery fixtures use
+    # confirmed Yorkshire Water schemas.
     meters = data.get("meters")
     if meters is None:
         return []
@@ -152,6 +186,22 @@ def parse_meter_discovery_response(data: dict[str, Any]) -> list[dict[str, Any]]
             }
         )
     return normalized
+
+
+def parse_account_summary_response(data: dict[str, Any]) -> dict[str, Any]:
+    """Parse only safe account status metadata from an account summary payload."""
+    _ensure_dict(data, "Account summary payload")
+
+    return {
+        "account_reference": data.get("accountReference"),
+        "display_account_reference": data.get("displayAccountReference"),
+        "account_status": data.get("accountStatus"),
+        "is_closed": data.get("isClosed"),
+        "is_metered": data.get("isMetered"),
+        "is_ready_for_reading": data.get("isReadyForReading"),
+        "account_start_date": _parse_optional_datetime(data.get("accountStartDate")),
+        "account_end_date": _parse_optional_datetime(data.get("accountEndDate")),
+    }
 
 
 def parse_current_consumption_response(data: dict[str, Any]) -> dict[str, Any]:
@@ -655,6 +705,22 @@ def _ensure_dict(data: Any, label: str) -> None:
     """Validate that a parser received a JSON object."""
     if not isinstance(data, dict):
         raise YorkshireWaterSchemaError(f"{label} was not a JSON object")
+
+
+def _parse_optional_datetime(value: Any) -> str | None:
+    """Parse optional datetime strings, treating known sentinel dates as unset."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value.startswith("0001-01-01T00:00:00"):
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if not isinstance(value, str):
+        raise YorkshireWaterSchemaError(f"Unsupported datetime value: {value!r}")
+
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
 
 
 def _normalise_optional_volume(value: Any, unit: Any) -> float | None:

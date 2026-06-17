@@ -94,6 +94,26 @@ Observed smart meter calls:
 
 No browser cookies are required by the integration scaffold at this stage. Only add cookie handling later if redacted response testing proves the bearer token is insufficient.
 
+## Captured Response Schemas
+
+Redacted token responses include `id_token`, `access_token`, `expires_in`, `token_type`, and `scope`. Parser code must not log or expose raw token values; it should keep only token presence and expiry metadata until auth storage is designed.
+
+Redacted meter discovery responses have been captured with:
+
+```json
+{
+  "accountReference": "ACCOUNT-REDACTED",
+  "meterReference": "METER-REDACTED",
+  "startDate": "2099-06-25T00:00:00",
+  "endDate": "0001-01-01T00:00:00",
+  "currentDate": "2099-06-17T00:00:00+00:00"
+}
+```
+
+Treat sentinel dates such as `0001-01-01T00:00:00` as unset.
+
+Account summary responses contain useful account status metadata, but they may also contain sensitive billing, payment, address, and postcode data. The integration should expose only safe account status fields by default and must not expose address, postcode, balance, payment plan, payment amounts, or direct debit details.
+
 ## Fields To Record
 
 For each candidate call, record exactly these fields:
