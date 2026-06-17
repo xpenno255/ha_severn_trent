@@ -1,4 +1,5 @@
 {
+  "routeName": "api_error",
   "error": {
     "code": "FAKE_ERROR",
     "message": "A fake redacted API error occurred.",

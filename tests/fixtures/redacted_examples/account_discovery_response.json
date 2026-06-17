@@ -1,4 +1,5 @@
 {
+  "routeName": "account_discovery_schema_pending",
   "customer": {
     "customerId": "CUSTOMER-REDACTED",
     "displayName": "Fake Customer"

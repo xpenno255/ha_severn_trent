@@ -11,9 +11,14 @@ from aiohttp import ClientError, ClientResponse, ClientSession
 
 from .const import (
     YORKSHIRE_WATER_API_BASE_URL,
+    YORKSHIRE_WATER_CURRENT_CONSUMPTION_ENDPOINT_PATH,
     YORKSHIRE_WATER_CURRENT_CONSUMPTION_PATH,
     YORKSHIRE_WATER_DAILY_CONSUMPTION_PATH,
+    YORKSHIRE_WATER_METER_DETAILS_ENDPOINT_PATH,
     YORKSHIRE_WATER_MONTHLY_CONSUMPTION_PATH,
+    YORKSHIRE_WATER_SMART_METER_API_BASE_URL,
+    YORKSHIRE_WATER_TOKEN_ENDPOINT,
+    YORKSHIRE_WATER_YOUR_USAGE_ENDPOINT_PATH,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -24,16 +29,33 @@ _SENSITIVE_KEYS = {
     "account_id",
     "accountid",
     "account_number",
+    "account_reference",
+    "accountreference",
     "authorization",
+    "authorization_code",
+    "bearer",
+    "code",
+    "code_verifier",
+    "codeverifier",
     "cookie",
     "customer",
+    "customer_id",
+    "customerid",
     "customer_reference",
     "customerreference",
+    "id_token",
     "meter",
     "meter_id",
     "meterid",
+    "meter_reference",
+    "meterreference",
     "mprn",
+    "refresh_token",
     "serial_number",
+    "session_id",
+    "sessionid",
+    "set_cookie",
+    "set-cookie",
     "session",
     "token",
 }
@@ -286,7 +308,82 @@ class YorkshireWaterAPI:
             }
         if isinstance(value, list):
             return [YorkshireWaterAPI.redact(item) for item in value]
+        if isinstance(value, str) and value.lower().startswith("bearer "):
+            return _REDACTED
         return value
+
+    async def async_exchange_authorization_code(
+        self,
+        authorization_code: str,
+        code_verifier: str,
+        *,
+        redirect_uri: str = "https://my.yorkshirewater.com/account/callback/response",
+        client_id: str = "css-onlineaccount-fe",
+    ) -> dict[str, Any]:
+        """Placeholder for the discovered OAuth authorization-code exchange.
+
+        TODO: Implement once token response handling and Home Assistant config
+        flow storage are designed. Do not log raw authorization codes, code
+        verifiers, access tokens, refresh tokens, or cookies.
+        """
+        form_shape = {
+            "client_id": client_id,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+            "code": authorization_code,
+            "code_verifier": code_verifier,
+        }
+        _LOGGER.debug(
+            "Yorkshire Water token route discovered: endpoint=%s content_type=%s form=%s",
+            YORKSHIRE_WATER_TOKEN_ENDPOINT,
+            "application/x-www-form-urlencoded",
+            self.redact(form_shape),
+        )
+        raise YorkshireWaterEndpointNotConfiguredError(
+            "Yorkshire Water OAuth token exchange is discovered but not implemented yet"
+        )
+
+    async def async_get_meter_details(self, account_reference: str) -> dict[str, Any]:
+        """Return a discovery placeholder for the meter details endpoint."""
+        _LOGGER.debug(
+            "Yorkshire Water meter details route discovered: %s params=%s",
+            YORKSHIRE_WATER_METER_DETAILS_ENDPOINT_PATH,
+            self.redact({"accountReference": account_reference}),
+        )
+        return _discovery_placeholder(
+            route_name="meter_details",
+            method="GET",
+            endpoint_path=YORKSHIRE_WATER_METER_DETAILS_ENDPOINT_PATH,
+            query_parameters={"accountReference": _REDACTED},
+        )
+
+    async def async_get_current_consumption(self, meter_reference: str) -> dict[str, Any]:
+        """Return a discovery placeholder for the current consumption endpoint."""
+        _LOGGER.debug(
+            "Yorkshire Water current consumption route discovered: %s params=%s",
+            YORKSHIRE_WATER_CURRENT_CONSUMPTION_ENDPOINT_PATH,
+            self.redact({"meterReference": meter_reference}),
+        )
+        return _discovery_placeholder(
+            route_name="current_consumption",
+            method="GET",
+            endpoint_path=YORKSHIRE_WATER_CURRENT_CONSUMPTION_ENDPOINT_PATH,
+            query_parameters={"meterReference": _REDACTED},
+        )
+
+    async def async_get_your_usage(self, meter_reference: str) -> dict[str, Any]:
+        """Return a discovery placeholder for the your usage endpoint."""
+        _LOGGER.debug(
+            "Yorkshire Water your usage route discovered: %s params=%s",
+            YORKSHIRE_WATER_YOUR_USAGE_ENDPOINT_PATH,
+            self.redact({"meterReference": meter_reference}),
+        )
+        return _discovery_placeholder(
+            route_name="your_usage",
+            method="GET",
+            endpoint_path=YORKSHIRE_WATER_YOUR_USAGE_ENDPOINT_PATH,
+            query_parameters={"meterReference": _REDACTED},
+        )
 
     async def async_fetch_usage_summary(self) -> dict[str, Any]:
         """Fetch and summarize current Yorkshire Water usage data."""
@@ -402,8 +499,9 @@ class YorkshireWaterAPI:
         url = f"{YORKSHIRE_WATER_API_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
         headers = {
             "Accept": "application/json",
-            # TODO: Confirm whether Yorkshire Water expects Bearer auth, a cookie,
-            # OAuth access token, CSRF header, or a combination.
+            # TODO: Wire this to a stored OAuth access token once token refresh
+            # and response schemas are implemented. Do not add cookie handling
+            # unless redacted response testing proves it is required.
             "Authorization": f"Bearer {self._session_token}",
         }
         params = {
@@ -569,6 +667,26 @@ def _normalise_optional_volume(value: Any, unit: Any) -> float | None:
         value=float(value),
         unit=str(unit),
     ).cubic_metres
+
+
+def _discovery_placeholder(
+    *,
+    route_name: str,
+    method: str,
+    endpoint_path: str,
+    query_parameters: dict[str, str],
+) -> dict[str, Any]:
+    """Return non-live route metadata while response schemas are unknown."""
+    return {
+        "status": "schema_pending",
+        "route_name": route_name,
+        "method": method,
+        "base_url": YORKSHIRE_WATER_SMART_METER_API_BASE_URL,
+        "endpoint_path": endpoint_path,
+        "query_parameters": query_parameters,
+        "request_body_shape": None,
+        "response_schema": None,
+    }
 
 
 def _first_present(data: dict[str, Any], *keys: str) -> Any:

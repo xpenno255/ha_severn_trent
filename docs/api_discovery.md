@@ -31,6 +31,69 @@ Look for requests that appear to handle:
 
 Names may differ in the portal. Prefer evidence from request paths, request bodies, response JSON keys, and the UI action that triggered the request.
 
+## Discovered Route Patterns
+
+Initial redacted captures show an OAuth Authorization Code with PKCE login flow. Do not share real authorization codes, code verifiers, access tokens, refresh tokens, ID tokens, cookies, or session identifiers.
+
+Token exchange:
+
+```json
+{
+  "method": "POST",
+  "endpoint": "https://login.yorkshirewater.com/connect/token",
+  "content_type": "application/x-www-form-urlencoded",
+  "request_body_shape": {
+    "client_id": "css-onlineaccount-fe",
+    "grant_type": "authorization_code",
+    "redirect_uri": "https://my.yorkshirewater.com/account/callback/response",
+    "code": "CODE-REDACTED",
+    "code_verifier": "CODE-VERIFIER-REDACTED"
+  }
+}
+```
+
+Smart meter API base:
+
+```text
+https://my.yorkshirewater.com/api/account/smartmeter
+```
+
+Observed smart meter calls:
+
+```json
+[
+  {
+    "route_name": "meter_details",
+    "method": "GET",
+    "endpoint_path": "/meter-details",
+    "query_parameters": {
+      "accountReference": "ACCOUNT-REDACTED"
+    },
+    "auth": "Authorization: Bearer TOKEN-REDACTED"
+  },
+  {
+    "route_name": "current_consumption",
+    "method": "GET",
+    "endpoint_path": "/current-consumption",
+    "query_parameters": {
+      "meterReference": "METER-REDACTED"
+    },
+    "auth": "Authorization: Bearer TOKEN-REDACTED"
+  },
+  {
+    "route_name": "your_usage",
+    "method": "GET",
+    "endpoint_path": "/your-usage",
+    "query_parameters": {
+      "meterReference": "METER-REDACTED"
+    },
+    "auth": "Authorization: Bearer TOKEN-REDACTED"
+  }
+]
+```
+
+No browser cookies are required by the integration scaffold at this stage. Only add cookie handling later if redacted response testing proves the bearer token is insufficient.
+
 ## Fields To Record
 
 For each candidate call, record exactly these fields:

@@ -1,4 +1,5 @@
 {
+  "routeName": "meter_details",
   "accountId": "ACCOUNT-REDACTED",
   "meters": [
     {

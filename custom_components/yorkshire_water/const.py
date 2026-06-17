@@ -14,10 +14,18 @@ AUTH_TYPE_SESSION_TOKEN = "session_token"
 DEFAULT_NAME = "Yorkshire Water"
 DEFAULT_SCAN_INTERVAL_HOURS = 6
 
-# Yorkshire Water portal endpoint details still need to be captured from a live
-# account session. Keep these disabled until the request/response contract is
-# known, rather than leaving the upstream Kraken GraphQL API active.
-YORKSHIRE_WATER_API_BASE_URL: str | None = None
+# Discovered Yorkshire Water portal routes. Response schemas are still unknown,
+# so production data fetch methods remain disabled below until redacted response
+# JSON structures are supplied.
+YORKSHIRE_WATER_TOKEN_ENDPOINT = "https://login.yorkshirewater.com/connect/token"
+YORKSHIRE_WATER_SMART_METER_API_BASE_URL = (
+    "https://my.yorkshirewater.com/api/account/smartmeter"
+)
+YORKSHIRE_WATER_METER_DETAILS_ENDPOINT_PATH = "/meter-details"
+YORKSHIRE_WATER_CURRENT_CONSUMPTION_ENDPOINT_PATH = "/current-consumption"
+YORKSHIRE_WATER_YOUR_USAGE_ENDPOINT_PATH = "/your-usage"
+
+YORKSHIRE_WATER_API_BASE_URL: str | None = YORKSHIRE_WATER_SMART_METER_API_BASE_URL
 YORKSHIRE_WATER_CURRENT_CONSUMPTION_PATH: str | None = None
 YORKSHIRE_WATER_DAILY_CONSUMPTION_PATH: str | None = None
 YORKSHIRE_WATER_MONTHLY_CONSUMPTION_PATH: str | None = None

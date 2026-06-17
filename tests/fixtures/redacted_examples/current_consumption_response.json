@@ -1,4 +1,5 @@
 {
+  "routeName": "current_consumption",
   "accountId": "ACCOUNT-REDACTED",
   "meterId": "METER-REDACTED",
   "currentConsumption": {
