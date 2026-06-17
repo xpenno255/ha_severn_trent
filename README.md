@@ -1,329 +1,114 @@
-# Severn Trent Water - Home Assistant Integration
+# Yorkshire Water - Home Assistant Integration
 
-A custom Home Assistant integration for monitoring water usage from Severn Trent smart meters via the Kraken API.
+A custom Home Assistant integration for Yorkshire Water smart meter usage.
 
-## Features
+This fork is being adapted from the upstream Severn Trent Water integration, but Yorkshire Water does not appear to use the same Kraken GraphQL API flow. The Home Assistant integration identity and architecture have been renamed, and the provider-specific API layer is now isolated for Yorkshire Water endpoint discovery.
 
-- **Guided Setup**: Paste a temporary browser token to generate an API key, and account/meter details are discovered automatically
-- **Yesterday's Usage**: Track your water consumption from the previous day
-- **7-Day Average**: Monitor your average daily water usage over the past week
-- **Week to Date**: See your water consumption from Monday to present in the current week
-- **Previous Week**: View your total water consumption for the previous week (Monday-Sunday)
-- **Meter Reading**: Official cumulative meter readings with historical data and usage between readings
-- **Estimated Current Meter Reading**: Accurate estimate of your current meter position based on official reading + daily/monthly usage
-- **Automatic Updates**: Data refreshes every hour
-- **Native Home Assistant Integration**: Full support for Home Assistant's sensor platform with proper units and device classes
+## Current Status
 
-## Requirements
+- Home Assistant domain: `yorkshire_water`
+- Component folder: `custom_components/yorkshire_water`
+- Integration name: Yorkshire Water
+- Repository: `https://github.com/Crash-Evans/ha_yorkshire_water`
+- API status: development scaffold only; live Yorkshire Water portal endpoints still need to be captured and implemented
 
-- Home Assistant 2025.1 or newer
-- A Severn Trent online account with smart meter
-- A temporary Authorization token from your Severn Trent browser session
-
-## Installation
-
-### HACS Installation (Recommended)
-
-1. Ensure you have [HACS](https://hacs.xyz/) installed in Home Assistant
-2. Open HACS in Home Assistant (sidebar)
-3. Click the three dots menu in the top right corner
-4. Select **"Custom repositories"**
-5. Add the repository:
-   - **Repository URL**: `https://github.com/xpenno255/ha_severn_trent`
-   - **Category**: Integration
-6. Click **"Add"**
-7. Close the custom repositories dialog
-8. Find "Severn Trent Water" in the HACS integration list
-9. Click **"Download"**
-10. Restart Home Assistant
-11. Go to Settings → Devices & Services → **Add Integration**
-12. Search for "Severn Trent Water" and follow the setup wizard
-
-### Manual Installation
-
-1. Copy the `severn_trent` folder to your Home Assistant `custom_components` directory:
-   ```
-   config/
-   └── custom_components/
-       └── severn_trent/
-           ├── __init__.py
-           ├── api.py
-           ├── config_flow.py
-           ├── const.py
-           ├── manifest.json
-           ├── sensor.py
-           └── strings.json
-   ```
-
-2. Restart Home Assistant
-
-3. Go to Settings → Devices & Services → Add Integration
-
-4. Search for "Severn Trent Water"
-
-## Configuration
-
-Setup is guided! You only need:
-
-1. **Browser Authorization Token**: Temporary token copied from your browser after logging in
-
-The integration will automatically:
-- Discover your account number(s)
-- Fetch your meter identifiers (Device ID and Market Supply Point ID)
-- Set up all sensors with historical data
-
-### Multiple Accounts
-
-If you have multiple Severn Trent accounts, you'll be prompted to select which one to monitor after entering your credentials.
-
-### Setup Process
-
-1. Add the integration through the Home Assistant UI
-2. Paste your browser Authorization token
-3. If you have multiple accounts, select the one to monitor
-4. Click Submit
-
-The integration will authenticate and begin fetching your water usage data immediately.
-
-### Getting the Browser Authorization Token
-
-See the [Token Retrieval Guide](docs/token_retrieval.md) for detailed instructions with screenshots.
+This is a new Home Assistant integration/domain. Existing Severn Trent entries are not migrated automatically; add Yorkshire Water as a fresh integration.
 
 ## Sensors
 
-The integration creates six sensors:
+The initial Yorkshire Water sensor set is intentionally practical:
 
-| Sensor | Description | Unit |
-|--------|-------------|------|
-| `sensor.severn_trent_yesterday_usage` | Water consumed yesterday | m³ |
-| `sensor.severn_trent_daily_average` | Average daily usage over 7 days | m³ |
-| `sensor.severn_trent_week_to_date` | Water consumed this week (Mon-present) | m³ |
-| `sensor.severn_trent_previous_week` | Water consumed last week (Mon-Sun) | m³ |
-| `sensor.severn_trent_meter_reading` | Official cumulative meter reading | m³ |
-| `sensor.severn_trent_estimated_meter_reading` | Estimated current meter reading | m³ |
+| Sensor | Entity ID pattern | Unit |
+| --- | --- | --- |
+| Yesterday Usage | `sensor.yorkshire_water_yesterday_usage` | m³ |
+| Today Usage | `sensor.yorkshire_water_today_usage` | m³ |
+| 7-Day Average | `sensor.yorkshire_water_7_day_average` | m³ |
+| Week to Date | `sensor.yorkshire_water_week_to_date` | m³ |
+| Previous Week | `sensor.yorkshire_water_previous_week` | m³ |
+| Meter Reading | `sensor.yorkshire_water_meter_reading` | m³ |
+| Status | `sensor.yorkshire_water_status` | diagnostic |
 
-### Sensor Attributes
+Usage values are normalized to cubic metres. Attributes include source period start/end, raw period data when available, data freshness, and whether the meter reading is estimated.
 
-Each sensor includes additional attributes:
+Until the live Yorkshire Water API contract is implemented, these sensors may be unavailable with a coordinator warning that the daily consumption endpoint is not configured.
 
-**Yesterday Usage:**
-- Date
-- Meter ID
+## Installation
 
-**Daily Average:**
-- Recent daily readings (last 7 days)
-- Period information
+### HACS
 
-**Week to Date:**
-- Week start date (Monday)
-- Number of days in current week so far
+1. Open HACS in Home Assistant.
+2. Open the custom repositories dialog.
+3. Add `https://github.com/Crash-Evans/ha_yorkshire_water` as an Integration repository.
+4. Download Yorkshire Water.
+5. Restart Home Assistant.
+6. Go to Settings -> Devices & Services -> Add Integration.
+7. Search for Yorkshire Water.
 
-**Previous Week:**
-- Week start date (Monday)
-- Week end date (Sunday)
-- Number of days in week (always 7)
+### Manual
 
-**Meter Reading:**
-- Reading date
-- Reading source (METER_READER, OPS, CUSTOMER)
-- Previous reading and date
-- Usage since last reading
-- Days between readings
-- Average daily usage between readings
-- All historical readings
+Copy `custom_components/yorkshire_water` into your Home Assistant `custom_components` directory:
 
-**Estimated Meter Reading:**
-- Last official reading and date
-- Usage accumulated since official reading
-- Days since official reading
-- Number of daily periods included (partial month)
-- Number of monthly periods included (complete months)
-- Estimation note
+```text
+config/
+└── custom_components/
+    └── yorkshire_water/
+        ├── __init__.py
+        ├── api.py
+        ├── config_flow.py
+        ├── const.py
+        ├── manifest.json
+        ├── sensor.py
+        └── strings.json
+```
 
-## How the Estimated Meter Reading Works
+Restart Home Assistant, then add Yorkshire Water from Settings -> Devices & Services.
 
-The estimated meter reading provides an accurate prediction of your current meter position:
+## Configuration
 
-1. Starts with your last official meter reading (taken every ~6 months by Severn Trent)
-2. If the official reading was taken mid-month, adds daily usage totals from that date to the end of that month
-3. Adds monthly usage totals for all complete months after the official reading month
-4. This approach prevents double-counting while minimizing API calls
+The current config flow is a temporary development flow. It accepts:
 
-**Example (mid-month reading):**
-- Official reading: 272 m³ (October 15th, 2024)
-- Daily usage Oct 15-31: 2.5 m³ (partial month - uses daily data)
-- November usage: 9.2 m³ (complete month - uses monthly data)
-- December usage: 8.8 m³ (complete month - uses monthly data)
-- Estimated current reading: 272 + 2.5 + 9.2 + 8.8 = 292.5 m³
+- Portal session or access token
+- Optional account ID or customer reference
+- Optional meter ID or serial number
 
-**Example (1st of month reading):**
-- Official reading: 272 m³ (October 1st, 2024)
-- October usage: 9.5 m³ (complete month - uses monthly data)
-- November usage: 9.2 m³ (complete month - uses monthly data)
-- Estimated current reading: 272 + 9.5 + 9.2 = 290.7 m³
+The integration stores only the values needed by the config entry. Do not paste tokens into GitHub issues, screenshots, or logs.
 
-This gives you an accurate running total between official 6-monthly readings.
+## API Discovery Notes
 
-## Data Sources
+The old Severn Trent Kraken GraphQL queries have been removed from the active integration. Yorkshire Water support needs a live portal capture to confirm:
 
-The integration uses three data sources:
+- Authentication method: OAuth, bearer token, session cookie, CSRF flow, or another mechanism
+- Account discovery endpoint
+- Meter discovery endpoint
+- Current meter reading or current consumption endpoint
+- Daily consumption endpoint
+- Monthly or period consumption endpoint, if available
 
-1. **Smart Meter Hourly Data**: Automated readings taken every hour, aggregated into daily totals for the past 7 days
-2. **Smart Meter Monthly Data**: Monthly usage totals for the past 12 months (includes partial current month)
-3. **Manual Meter Readings**: Official readings taken periodically (typically bi-annually) showing cumulative meter totals
+The API client already has async request helpers, structured errors, safe redacted debug logging, and normalizers ready to adapt once the endpoint schema is known.
 
-## Troubleshooting
+Sensitive values redacted from debug logs include authorization headers, cookies, tokens, customer references, account IDs, and meter IDs.
 
-### No Data Showing
-
-1. Check the Home Assistant logs (Settings → System → Logs)
-2. Filter for "severn_trent" to see integration-specific messages
-3. Manually trigger an update:
-   ```yaml
-   service: homeassistant.update_entity
-   target:
-     entity_id: sensor.severn_trent_yesterday_usage
-   ```
-
-### Authentication Errors
-
-If you see authentication errors:
-- Ensure the browser token is fresh (it can expire quickly)
-- Reopen the Severn Trent website, log in again, and copy a new `Authorization` token
-- Make sure you pasted the raw token value (no extra whitespace)
-
-### No Accounts Found
-
-If the integration reports "No Severn Trent accounts found":
-- Verify you have an active Severn Trent account
-- Check that your account has a smart water meter installed
-- Try logging into the Severn Trent website to confirm your account is active
-
-### Enable Debug Logging
-
-Add to your `configuration.yaml`:
+## Debug Logging
 
 ```yaml
 logger:
   default: info
   logs:
-    custom_components.severn_trent: debug
+    custom_components.yorkshire_water: debug
 ```
 
-Then restart Home Assistant to see detailed logs.
+Debug logs are designed to be useful during endpoint discovery while redacting sensitive fields.
 
-## API Information
+## Validation
 
-This integration uses the Kraken API platform (developed by Octopus Energy and used by Severn Trent). The API:
-- Uses GraphQL for data queries
-- Requires JWT authentication
-- Provides hourly, daily, and monthly water usage data from smart meters
-- Provides manual meter readings with historical data
-- Tokens expire after 15 minutes (automatically refreshed)
+From the repository root:
 
-## Update Frequency
-
-By default, the integration updates every hour. To change this, edit `__init__.py`:
-
-```python
-update_interval=timedelta(hours=1),  # Change to desired interval
+```bash
+python -m compileall custom_components/yorkshire_water
 ```
 
-Recommended intervals:
-- Hourly: `timedelta(hours=1)` (default)
-- Every 6 hours: `timedelta(hours=6)`
-- Daily: `timedelta(days=1)`
+If your development environment has Home Assistant tooling installed, also run manifest validation and any configured linter or test suite.
 
-Note: Smart meter data has a delay - hourly readings aren't available immediately and yesterday's data is the most recent complete day available.
+## Upstream Attribution
 
-## Data Limitations
-
-**Smart Meter Data:**
-- Hourly readings have a processing delay
-- "Yesterday" is the most recent complete day available
-- "Today" data is not available due to API limitations
-- Hourly data is aggregated into daily totals
-- Monthly data includes partial data for incomplete months
-
-**Manual Meter Readings:**
-- Typically taken bi-annually by meter readers
-- Shows cumulative meter total (like an odometer)
-- Historical readings available for usage tracking over time
-
-## Energy Dashboard Integration
-
-The water consumption sensors can be added to Home Assistant's Energy Dashboard:
-1. Go to Settings → Dashboards → Energy
-2. Add Water Consumption
-3. Select `sensor.severn_trent_week_to_date` or `sensor.severn_trent_previous_week`
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the MIT License.
-
-## Disclaimer
-
-This is an unofficial integration and is not affiliated with or endorsed by Severn Trent. Use at your own risk.
-
-## Acknowledgments
-
-- Built using the Kraken API platform by Octopus Energy
-- Thanks to the Home Assistant community
-- Special thanks to all contributors who helped discover API endpoints and improve the integration
-
-## Support
-
-For issues, questions, or feature requests, please open an issue on GitHub.
-
-## Changelog
-
-### v1.5.2
--- bump version to fix an issue with home asisstant
-
-### v1.5.1
--- Update user docs to help explain the authenticaiton tocken retrival process
-
-### v1.5.0
--- Thanks to @RobXYZ the sensors are now part of a meter device.
-
-### v1.4.1
-- **Critical Fix**: Previous week sensor now shows correct values
-  - Fixed data fetching to cover complete previous week
-  - Resolves issue where weekly usage was underreported
-
-### v1.4.0
-- **Breaking Change**: Replaced "Weekly Total" sensor with "Week to Date" (Monday-present)
-- Added new "Previous Week" sensor (Monday-Sunday of last week)
-- Fixed state classes for proper Home Assistant statistics integration
-- Improved estimated meter reading calculation to prevent double-counting
-  - Uses daily data for partial months when official reading is mid-month
-  - Uses monthly data only for complete months after official reading
-- Enhanced date comparison logic (proper datetime vs string comparison)
-- Added device classes to all water consumption sensors
-- Improved error handling and validation logging
-- All sensors now properly support Home Assistant Energy Dashboard
-
-### v1.3.0
-- Switched authentication to a browser token -> API key flow
-- Added reauthentication support for refreshing the API key
-
-### v1.2.0
-- Added estimated current meter reading sensor
-- Fetches monthly usage data (past 12 months) for accurate estimation
-- Improved calculation: official reading + monthly totals (including partial current month)
-
-### v1.1.0
-- Added automatic discovery of account numbers
-- Added automatic discovery of meter identifiers
-- Simplified setup to just email and password
-- Added support for multiple accounts
-- Added manual meter reading sensor with historical data
-
-### v1.0.0
-- Initial release
-- Smart meter daily usage tracking
-- 7-day average and weekly total sensors
+This fork originated from `xpenno255/ha_severn_trent`. Historical changelog entries and license attribution are retained where appropriate, but user-facing integration branding is now Yorkshire Water.

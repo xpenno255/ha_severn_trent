@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0] - 2026-06-17
+
+### Changed
+- Renamed the Home Assistant integration domain from `severn_trent` to `yorkshire_water`.
+- Renamed the custom component folder to `custom_components/yorkshire_water`.
+- Updated manifest, HACS metadata, config flow strings, logger namespace, docs, and README for Yorkshire Water.
+- Replaced the upstream synchronous Kraken GraphQL client with an async Yorkshire Water API scaffold.
+- Removed active Severn Trent/Kraken queries from the provider layer.
+- Reduced the initial entity surface to water usage, meter reading, and status sensors.
+
+### Notes
+- This is a new integration/domain; existing Severn Trent config entries are not migrated.
+- Live Yorkshire Water portal endpoint details still need to be captured before sensors can fetch production data.
+- Historical upstream changelog entries are retained below for attribution.
+
 ### [1.5.2] - 2026-01-20
 -- bump version to fix an issue with home asisstant
 

@@ -1,0 +1,56 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Yorkshire Water",
+        "description": "Temporary development setup: paste a current Yorkshire Water portal session token or access token. Optional account and meter IDs can be supplied if known. Endpoint support is still being discovered, so sensors may remain unavailable until the API layer is completed.",
+        "data": {
+          "session_token": "Portal session or access token",
+          "account_id": "Account ID or customer reference",
+          "meter_id": "Meter ID or serial number"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Yorkshire Water",
+        "description": "Paste a fresh Yorkshire Water portal session token or access token.",
+        "data": {
+          "session_token": "Portal session or access token"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Enter a valid session token or access token",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "This Yorkshire Water account or meter is already configured",
+      "reauth_successful": "Reauthentication was successful",
+      "unknown": "Unable to reauthenticate this entry"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "yesterday_usage": {
+        "name": "Yesterday Usage"
+      },
+      "today_usage": {
+        "name": "Today Usage"
+      },
+      "daily_average": {
+        "name": "7-Day Average"
+      },
+      "week_to_date": {
+        "name": "Week to Date"
+      },
+      "previous_week": {
+        "name": "Previous Week"
+      },
+      "meter_reading": {
+        "name": "Meter Reading"
+      },
+      "status": {
+        "name": "Status"
+      }
+    }
+  }
+}

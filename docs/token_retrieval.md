@@ -1,14 +1,35 @@
-# Retrieving Your Authentication Token
+# Yorkshire Water Portal Capture Notes
 
-This guide explains how to retrieve your Severn Trent authentication token using Chrome Developer Tools.
+Yorkshire Water endpoint support is still being discovered. This page is for development captures only; it is not a stable user setup guide yet.
 
-Once logged into your Severn Trent account on the web:
+## What To Capture
 
-1. Open Chrome Dev Tools (press `F12`) and select the **Network** tab
-2. In the filter box, type `graphql`
-3. Select one of the `graphql/` entries from the list under **Name** and ensure that **Headers** is selected
-4. Scroll down until you see the **Request Headers** section - there should be an **Authorization** entry that contains the token we require (starts with `eyJ`)
+After logging in to the Yorkshire Water portal, use browser developer tools to identify:
 
-Copy this token into the integration setup page.
+- Authentication flow and token/session lifetime
+- Whether requests use an `Authorization` header, cookies, CSRF tokens, or OAuth
+- Account/customer discovery requests
+- Meter discovery requests
+- Current consumption or current meter reading requests
+- Daily usage requests
+- Monthly or custom-period usage requests, if present
 
-![Chrome Developer Tools](../img/chrome_dev_tools.png)
+## Safety
+
+- Do not share raw authorization headers, cookies, session tokens, customer references, account IDs, or meter IDs.
+- Redact sensitive values before opening GitHub issues.
+- Do not commit captured responses containing personal data.
+- Prefer sharing request/response schemas with fake IDs and representative numeric values.
+
+## Useful Debugging
+
+Enable Home Assistant debug logging:
+
+```yaml
+logger:
+  default: info
+  logs:
+    custom_components.yorkshire_water: debug
+```
+
+The integration redacts known sensitive fields from its own debug logs, but browser captures are not automatically redacted.
