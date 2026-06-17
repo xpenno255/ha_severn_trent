@@ -1,21 +1,17 @@
 {
   "routeName": "your_usage",
-  "accountId": "ACCOUNT-REDACTED",
-  "meterId": "METER-REDACTED",
-  "dailyConsumption": [
+  "dailyUsageData": [
     {
       "date": "2099-01-13",
-      "value": 110.5,
-      "unit": "litres",
-      "source": "fake-fixture",
-      "freshness": "complete"
+      "totalConsumptionLitres": "110.5",
+      "estimatedDayCount": 0,
+      "missingDayCount": 0
     },
     {
       "date": "2099-01-14",
-      "value": 0.112,
-      "unit": "m3",
-      "source": "fake-fixture",
-      "freshness": "complete"
+      "totalConsumptionLitres": "112",
+      "estimatedDayCount": 0,
+      "missingDayCount": 0
     }
   ]
 }

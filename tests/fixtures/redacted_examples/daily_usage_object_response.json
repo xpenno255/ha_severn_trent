@@ -1,0 +1,23 @@
+{
+  "routeName": "your_usage_daily",
+  "dailyUsageData": [
+    {
+      "date": "2099-06-15",
+      "totalConsumptionLitres": "123",
+      "estimatedDayCount": 0,
+      "missingDayCount": 0,
+      "totalCostIncludingSewerage": 0.57,
+      "standardTariffCleanWaterCost": 0.26,
+      "standardTariffSewerageCost": 0.31
+    },
+    {
+      "date": "2099-06-16",
+      "totalConsumptionLitres": "98",
+      "estimatedDayCount": 0,
+      "missingDayCount": 0,
+      "totalCostIncludingSewerage": 0.45,
+      "standardTariffCleanWaterCost": 0.2,
+      "standardTariffSewerageCost": 0.25
+    }
+  ]
+}

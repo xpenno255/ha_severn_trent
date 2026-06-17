@@ -6,6 +6,8 @@
     "meterReading": 123.456,
     "unit": "m3",
     "estimated": false,
-    "readingDate": "2099-01-15"
+    "readingDate": "2099-01-15",
+    "continuousFlowAlarm": false,
+    "dataLatestUpdateStatus": "complete"
   }
 }

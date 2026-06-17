@@ -158,7 +158,7 @@ def parse_account_discovery_response(data: dict[str, Any]) -> list[dict[str, Any
 
 def parse_meter_discovery_response(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Parse a redacted meter discovery response into a normalized shape."""
-    _ensure_dict(data, "Meter discovery payload")
+    _ensure_response_shape("meter_details", data, dict)
 
     if "accountReference" in data or "meterReference" in data:
         return [
@@ -212,7 +212,7 @@ def parse_account_summary_response(data: dict[str, Any]) -> dict[str, Any]:
 
 def parse_current_consumption_response(data: dict[str, Any]) -> dict[str, Any]:
     """Parse a redacted current consumption response into a normalized shape."""
-    _ensure_dict(data, "Current consumption payload")
+    _ensure_response_shape("current_consumption", data, dict)
 
     # TODO: Replace these scaffold mappings once captured Yorkshire Water
     # schemas confirm whether this endpoint is a reading, consumption total, or
@@ -244,41 +244,135 @@ def parse_current_consumption_response(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+JsonPayload = dict[str, Any] | list[Any]
+
+
 def parse_daily_consumption_response(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Parse a redacted daily consumption response into normalized periods."""
-    _ensure_dict(data, "Daily consumption payload")
+    _ensure_response_shape("your_usage", data, dict)
 
-    # TODO: Replace these scaffold mappings once captured Yorkshire Water
-    # schemas confirm daily usage field names, units, and completion markers.
-    raw_items = (
-        data.get("dailyConsumption")
-        or data.get("daily_consumption")
-        or data.get("items")
-        or data.get("data")
-    )
+    raw_items = data.get("dailyUsageData")
     if raw_items is None:
         return []
     if not isinstance(raw_items, list):
-        raise YorkshireWaterSchemaError("Daily consumption payload did not contain a list")
+        raise YorkshireWaterSchemaError(
+            "Unexpected Yorkshire Water response shape for your_usage: "
+            f"{_json_type_name(raw_items)}"
+        )
 
     normalized: list[dict[str, Any]] = []
     for item in raw_items:
         if not isinstance(item, dict):
-            raise YorkshireWaterSchemaError("Daily consumption item was not an object")
+            raise YorkshireWaterSchemaError(
+                "Unexpected Yorkshire Water response shape for your_usage: "
+                f"{_json_type_name(item)}"
+            )
         start_value = _first_present(item, "startDate", "start_date", "date")
         end_value = _first_present(item, "endDate", "end_date") or start_value
-        value = _first_present(item, "value", "usage", "consumption")
-        unit = _first_present(item, "unit", "uom", "unitOfMeasure") or "m3"
+        value = _first_present(
+            item,
+            "totalConsumptionLitres",
+            "total_consumption_litres",
+            "value",
+            "usage",
+            "consumption",
+        )
+        unit = _first_present(item, "unit", "uom", "unitOfMeasure") or (
+            "litres"
+            if _first_present(item, "totalConsumptionLitres", "total_consumption_litres")
+            is not None
+            else "m3"
+        )
         volume = _normalise_optional_volume(value, unit)
         normalized.append(
             {
                 "start": _parse_date(start_value).isoformat() if start_value else None,
                 "end": _parse_date(end_value).isoformat() if end_value else None,
                 "value_m3": round(volume, 3) if volume is not None else None,
+                "estimated_day_count": _first_present(
+                    item,
+                    "estimatedDayCount",
+                    "estimated_day_count",
+                ),
+                "missing_day_count": _first_present(
+                    item,
+                    "missingDayCount",
+                    "missing_day_count",
+                ),
                 "source": item.get("source"),
                 "freshness": item.get("freshness") or item.get("lastUpdated"),
+                "total_cost": _first_present(
+                    item,
+                    "totalCostIncludingSewerage",
+                    "total_cost_including_sewerage",
+                    "totalCost",
+                    "total_cost",
+                ),
+                "clean_water_cost": _first_present(
+                    item,
+                    "standardTariffCleanWaterCost",
+                    "standard_tariff_clean_water_cost",
+                    "cleanWaterCost",
+                    "clean_water_cost",
+                ),
+                "sewerage_cost": _first_present(
+                    item,
+                    "standardTariffSewerageCost",
+                    "standard_tariff_sewerage_cost",
+                    "sewerageCost",
+                    "sewerage_cost",
+                ),
             }
         )
+    return normalized
+
+
+def parse_monthly_consumption_response(data: JsonPayload) -> list[dict[str, Any]]:
+    """Parse monthly consumption from a list response or monthlyConsumption object."""
+    if isinstance(data, list):
+        raw_items = data
+    else:
+        _ensure_response_shape("monthly_usage", data, dict)
+        raw_items = data.get("monthlyConsumption")
+        if raw_items is None:
+            return []
+    if not isinstance(raw_items, list):
+        raise YorkshireWaterSchemaError(
+            "Unexpected Yorkshire Water response shape for monthly_usage: "
+            f"{_json_type_name(raw_items)}"
+        )
+
+    normalized: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            raise YorkshireWaterSchemaError(
+                "Unexpected Yorkshire Water response shape for monthly_usage: "
+                f"{_json_type_name(item)}"
+            )
+        normalized.append(_period_from_payload(item))
+    return normalized
+
+
+def parse_yearly_consumption_response(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parse yearly usage from an object containing monthlyConsumption."""
+    _ensure_response_shape("yearly_usage", data, dict)
+    raw_items = data.get("monthlyConsumption")
+    if raw_items is None:
+        return []
+    if not isinstance(raw_items, list):
+        raise YorkshireWaterSchemaError(
+            "Unexpected Yorkshire Water response shape for yearly_usage: "
+            f"{_json_type_name(raw_items)}"
+        )
+
+    normalized: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            raise YorkshireWaterSchemaError(
+                "Unexpected Yorkshire Water response shape for yearly_usage: "
+                f"{_json_type_name(item)}"
+            )
+        normalized.append(_period_from_payload(item))
     return normalized
 
 
@@ -421,8 +515,10 @@ class YorkshireWaterAPI:
         payload = await self._async_request_json(
             "GET",
             YORKSHIRE_WATER_METER_DETAILS_ENDPOINT_PATH,
+            endpoint_label="meter_details",
             params={"accountReference": account_reference},
         )
+        _ensure_response_shape("meter_details", payload, dict)
         meters = parse_meter_discovery_response(payload)
         if meters:
             first_meter = meters[0]
@@ -437,17 +533,22 @@ class YorkshireWaterAPI:
         payload = await self._async_request_json(
             "GET",
             YORKSHIRE_WATER_CURRENT_CONSUMPTION_ENDPOINT_PATH,
+            endpoint_label="current_consumption",
             params={"meterReference": meter_reference},
         )
+        _ensure_response_shape("current_consumption", payload, dict)
         return parse_current_consumption_response(payload)
 
-    async def async_get_your_usage(self, meter_reference: str) -> dict[str, Any]:
+    async def async_get_your_usage(self, meter_reference: str) -> JsonPayload:
         """Fetch usage history for a meter reference."""
-        return await self._async_request_json(
+        payload = await self._async_request_json(
             "GET",
             YORKSHIRE_WATER_YOUR_USAGE_ENDPOINT_PATH,
+            endpoint_label="your_usage",
             params={"meterReference": meter_reference},
         )
+        _ensure_response_shape("your_usage", payload, (dict, list))
+        return payload
 
     async def async_fetch_usage_summary(self) -> dict[str, Any]:
         """Fetch and summarize current Yorkshire Water usage data."""
@@ -509,9 +610,15 @@ class YorkshireWaterAPI:
         yesterday_period = by_start.get(yesterday)
         today_period = by_start.get(today)
         latest_period = max(daily_periods, key=lambda item: item["end_date"], default=None)
-        estimated_day_count = sum(1 for period in daily_periods if period.get("estimated"))
-        missing_day_count = _count_missing_days(daily_periods)
-        latest_update = _first_present(
+        estimated_day_count = (
+            _sum_period_count(daily_periods + monthly_periods, "estimated_day_count")
+            or sum(1 for period in daily_periods if period.get("estimated"))
+        )
+        missing_day_count = (
+            _sum_period_count(daily_periods + monthly_periods, "missing_day_count")
+            or _count_missing_days(daily_periods)
+        )
+        latest_update = _find_first_key(
             usage_payload,
             "latestUpdateDate",
             "latest_update_date",
@@ -561,7 +668,7 @@ class YorkshireWaterAPI:
                 "continuous_flow",
             )
             or _first_present(
-                usage_payload,
+                usage_payload if isinstance(usage_payload, dict) else {},
                 "continuousFlowAlarm",
                 "continuous_flow_alarm",
                 "continuousFlowStatus",
@@ -574,7 +681,7 @@ class YorkshireWaterAPI:
                 "latest_update_status",
             )
             or _first_present(
-                usage_payload,
+                usage_payload if isinstance(usage_payload, dict) else {},
                 "dataLatestUpdateStatus",
                 "latest_update_status",
                 "status",
@@ -613,7 +720,9 @@ class YorkshireWaterAPI:
         payload = await self._async_request_json(
             "GET",
             YORKSHIRE_WATER_CURRENT_CONSUMPTION_PATH,
+            endpoint_label="current_consumption",
         )
+        _ensure_response_shape("current_consumption", payload, dict)
         return self._normalise_current_consumption(payload)
 
     async def async_fetch_daily_consumption(self) -> list[UsagePeriod]:
@@ -627,7 +736,12 @@ class YorkshireWaterAPI:
                 "Yorkshire Water daily consumption endpoint is not configured yet"
             )
 
-        payload = await self._async_request_json("GET", YORKSHIRE_WATER_DAILY_CONSUMPTION_PATH)
+        payload = await self._async_request_json(
+            "GET",
+            YORKSHIRE_WATER_DAILY_CONSUMPTION_PATH,
+            endpoint_label="your_usage",
+        )
+        _ensure_response_shape("your_usage", payload, dict)
         return self._normalise_daily_consumption(payload)
 
     async def async_fetch_monthly_consumption(self) -> list[UsagePeriod]:
@@ -635,7 +749,12 @@ class YorkshireWaterAPI:
         if not YORKSHIRE_WATER_MONTHLY_CONSUMPTION_PATH:
             return []
 
-        payload = await self._async_request_json("GET", YORKSHIRE_WATER_MONTHLY_CONSUMPTION_PATH)
+        payload = await self._async_request_json(
+            "GET",
+            YORKSHIRE_WATER_MONTHLY_CONSUMPTION_PATH,
+            endpoint_label="monthly_usage",
+        )
+        _ensure_response_shape("monthly_usage", payload, (dict, list))
         return self._normalise_daily_consumption(payload)
 
     async def _async_request_json(
@@ -643,8 +762,9 @@ class YorkshireWaterAPI:
         method: str,
         path: str,
         *,
+        endpoint_label: str,
         params: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> JsonPayload:
         """Make a redacted authenticated request and return JSON."""
         if not YORKSHIRE_WATER_API_BASE_URL:
             raise YorkshireWaterEndpointNotConfiguredError(
@@ -667,13 +787,7 @@ class YorkshireWaterAPI:
             key: value for key, value in (params or {}).items() if value is not None
         }
 
-        _LOGGER.debug(
-            "Yorkshire Water API request: %s %s params=%s headers=%s",
-            method,
-            path,
-            self.redact(request_params),
-            self.redact(headers),
-        )
+        _LOGGER.debug("Yorkshire Water API request: %s %s", method, endpoint_label)
 
         try:
             async with self._session.request(
@@ -688,9 +802,16 @@ class YorkshireWaterAPI:
         except ClientError as err:
             raise YorkshireWaterError(f"Error communicating with Yorkshire Water: {err}") from err
 
-        _LOGGER.debug("Yorkshire Water API response: %s", self.redact(payload))
-        if not isinstance(payload, dict):
-            raise YorkshireWaterSchemaError("Yorkshire Water response was not a JSON object")
+        if not isinstance(payload, (dict, list)):
+            raise YorkshireWaterSchemaError(
+                "Unexpected Yorkshire Water response shape for "
+                f"{endpoint_label}: {_json_type_name(payload)}"
+            )
+        _LOGGER.debug(
+            "Yorkshire Water API response: %s top_level=%s",
+            endpoint_label,
+            _json_type_name(payload),
+        )
         return payload
 
     async def _raise_for_status(self, response: ClientResponse) -> None:
@@ -816,6 +937,36 @@ def _ensure_dict(data: Any, label: str) -> None:
         raise YorkshireWaterSchemaError(f"{label} was not a JSON object")
 
 
+def _ensure_response_shape(
+    endpoint_label: str,
+    data: Any,
+    expected: type | tuple[type, ...],
+) -> None:
+    """Validate a response shape without exposing payload content."""
+    if not isinstance(data, expected):
+        raise YorkshireWaterSchemaError(
+            "Unexpected Yorkshire Water response shape for "
+            f"{endpoint_label}: {_json_type_name(data)}"
+        )
+
+
+def _json_type_name(value: Any) -> str:
+    """Return a simple JSON-ish type name for safe schema errors."""
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "list"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if value is None:
+        return "null"
+    return type(value).__name__
+
+
 def _parse_optional_datetime(value: Any) -> str | None:
     """Parse optional datetime strings, treating known sentinel dates as unset."""
     if value is None:
@@ -844,53 +995,22 @@ def _normalise_optional_volume(value: Any, unit: Any) -> float | None:
     ).cubic_metres
 
 
-def _extract_usage_periods(payload: dict[str, Any], grain: str) -> list[dict[str, Any]]:
+def _extract_usage_periods(payload: JsonPayload, grain: str) -> list[dict[str, Any]]:
     """Extract usage periods from a captured usage payload."""
-    keys_by_grain = {
-        "daily": (
-            "dailyConsumption",
-            "daily_consumption",
-            "dailyUsage",
-            "daily_usage",
-            "days",
-            "dayUsage",
-        ),
-        "monthly": (
-            "monthlyConsumption",
-            "monthly_consumption",
-            "monthlyUsage",
-            "monthly_usage",
-            "months",
-            "monthUsage",
-        ),
-        "yearly": (
-            "yearlyConsumption",
-            "yearly_consumption",
-            "yearlyUsage",
-            "yearly_usage",
-            "years",
-            "yearUsage",
-        ),
-    }
-    raw_items = _find_first_key(payload, *keys_by_grain[grain])
-    if raw_items is None and grain == "daily":
+    if grain == "daily":
+        if not isinstance(payload, dict):
+            return []
         try:
             return [_period_from_normalized_dict(item) for item in parse_daily_consumption_response(payload)]
         except YorkshireWaterSchemaError:
             return []
-    if raw_items is None:
-        return []
-    if isinstance(raw_items, dict):
-        raw_items = raw_items.get("items") or raw_items.get("data") or raw_items.get("periods")
-    if not isinstance(raw_items, list):
-        raise YorkshireWaterSchemaError(f"{grain.title()} usage payload did not contain a list")
-
-    periods: list[dict[str, Any]] = []
-    for item in raw_items:
-        if not isinstance(item, dict):
-            raise YorkshireWaterSchemaError(f"{grain.title()} usage item was not an object")
-        periods.append(_period_from_payload(item))
-    return periods
+    if grain == "monthly":
+        return parse_monthly_consumption_response(payload)
+    if grain == "yearly":
+        if not isinstance(payload, dict):
+            return []
+        return parse_yearly_consumption_response(payload)
+    raise YorkshireWaterSchemaError(f"Unsupported usage grain: {grain}")
 
 
 def _period_from_normalized_dict(item: dict[str, Any]) -> dict[str, Any]:
@@ -907,6 +1027,8 @@ def _period_from_normalized_dict(item: dict[str, Any]) -> dict[str, Any]:
         if value_m3 is not None
         else None,
         "estimated": item.get("estimated"),
+        "estimated_day_count": item.get("estimated_day_count"),
+        "missing_day_count": item.get("missing_day_count"),
         "source": item.get("source"),
         "freshness": item.get("freshness"),
         "total_cost": item.get("total_cost"),
@@ -941,6 +1063,8 @@ def _period_from_payload(item: dict[str, Any]) -> dict[str, Any]:
         item,
         "litres",
         "liters",
+        "totalConsumptionLitres",
+        "total_consumption_litres",
         "usageLitres",
         "usage_litres",
         "value",
@@ -948,7 +1072,18 @@ def _period_from_payload(item: dict[str, Any]) -> dict[str, Any]:
         "consumption",
     )
     unit = _first_present(item, "unit", "uom", "unitOfMeasure") or (
-        "litres" if _first_present(item, "litres", "liters", "usageLitres", "usage_litres") is not None else "m3"
+        "litres"
+        if _first_present(
+            item,
+            "litres",
+            "liters",
+            "totalConsumptionLitres",
+            "total_consumption_litres",
+            "usageLitres",
+            "usage_litres",
+        )
+        is not None
+        else "m3"
     )
     value_litres = _normalise_optional_litres(value, unit)
     return {
@@ -956,13 +1091,35 @@ def _period_from_payload(item: dict[str, Any]) -> dict[str, Any]:
         "end": _parse_date(end_value).isoformat() if end_value else None,
         "start_date": _parse_date(start_value) if start_value else date.min,
         "end_date": _parse_date(end_value) if end_value else date.min,
+        "month": item.get("month"),
+        "year": item.get("year"),
         "value_litres": round(value_litres, 2) if value_litres is not None else None,
         "estimated": _first_present(item, "estimated", "isEstimated", "is_estimated"),
+        "estimated_day_count": _first_present(item, "estimatedDayCount", "estimated_day_count"),
+        "missing_day_count": _first_present(item, "missingDayCount", "missing_day_count"),
         "source": item.get("source"),
         "freshness": item.get("freshness") or item.get("lastUpdated"),
-        "total_cost": _first_present(item, "totalCost", "total_cost"),
-        "clean_water_cost": _first_present(item, "cleanWaterCost", "clean_water_cost"),
-        "sewerage_cost": _first_present(item, "sewerageCost", "sewerage_cost"),
+        "total_cost": _first_present(
+            item,
+            "totalCostIncludingSewerage",
+            "total_cost_including_sewerage",
+            "totalCost",
+            "total_cost",
+        ),
+        "clean_water_cost": _first_present(
+            item,
+            "standardTariffCleanWaterCost",
+            "standard_tariff_clean_water_cost",
+            "cleanWaterCost",
+            "clean_water_cost",
+        ),
+        "sewerage_cost": _first_present(
+            item,
+            "standardTariffSewerageCost",
+            "standard_tariff_sewerage_cost",
+            "sewerageCost",
+            "sewerage_cost",
+        ),
     }
 
 
@@ -994,13 +1151,27 @@ def _count_missing_days(periods: list[dict[str, Any]]) -> int:
     return max(expected_days - len(dated), 0)
 
 
+def _sum_period_count(periods: list[dict[str, Any]], key: str) -> int:
+    """Sum optional integer count fields from normalized periods."""
+    total = 0
+    for period in periods:
+        value = period.get(key)
+        if value is not None:
+            total += int(value)
+    return total
+
+
 def _usage_period_as_dict(period: dict[str, Any]) -> dict[str, Any]:
     """Serialize a normalized usage period for sensor attributes."""
     return {
         "start": period.get("start"),
         "end": period.get("end"),
+        "month": period.get("month"),
+        "year": period.get("year"),
         "value_litres": period.get("value_litres"),
         "estimated": period.get("estimated"),
+        "estimated_day_count": period.get("estimated_day_count"),
+        "missing_day_count": period.get("missing_day_count"),
         "source": period.get("source"),
         "freshness": period.get("freshness"),
         "total_cost": period.get("total_cost"),
