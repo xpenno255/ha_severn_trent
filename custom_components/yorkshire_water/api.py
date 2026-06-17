@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+import json
 import logging
 from typing import Any
 
@@ -61,6 +63,8 @@ _SENSITIVE_KEYS = {
     "set-cookie",
     "session",
     "token",
+    "token_response_json",
+    "tokenresponsejson",
 }
 
 
@@ -124,6 +128,76 @@ def parse_token_response(data: dict[str, Any]) -> dict[str, Any]:
         "expires_at": expires_at.isoformat(),
         "token_type": data.get("token_type"),
         "scope": scope.split() if isinstance(scope, str) else [],
+    }
+
+
+def normalize_bearer_token(value: str | None) -> str | None:
+    """Normalize a pasted access token without logging or validating it online."""
+    if value is None:
+        return None
+    token = value.strip().strip("\"'")
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip().strip("\"'")
+    return token or None
+
+
+def token_looks_like_id_token(token: str | None) -> bool:
+    """Return True when a pasted JWT appears to be an ID token."""
+    if not token or token.count(".") != 2:
+        return False
+    try:
+        payload_segment = token.split(".")[1]
+        payload_segment += "=" * (-len(payload_segment) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_segment))
+    except Exception:
+        return False
+    return any(key in payload for key in ("nonce", "auth_time", "amr")) or (
+        payload.get("typ") == "ID"
+    )
+
+
+def build_token_auth_data(
+    *,
+    raw_access_token: str | None = None,
+    token_response_json: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Build safe config-entry auth data from beta token inputs."""
+    now = now or datetime.now(UTC)
+    if token_response_json and token_response_json.strip():
+        try:
+            token_response = json.loads(token_response_json)
+        except json.JSONDecodeError as err:
+            raise YorkshireWaterSchemaError("Token response JSON was not valid JSON") from err
+        if not isinstance(token_response, dict):
+            raise YorkshireWaterSchemaError("Token response JSON was not an object")
+
+        token_metadata = parse_token_response(token_response)
+        access_token = normalize_bearer_token(token_response.get("access_token"))
+        if not access_token:
+            raise YorkshireWaterAuthError("Token response did not include an access token")
+
+        expires_at = now + timedelta(seconds=token_metadata["expires_in"])
+        if expires_at <= now:
+            raise YorkshireWaterExpiredSessionError("Yorkshire Water token response is expired")
+
+        return {
+            "access_token": access_token,
+            "token_expires_at": expires_at.isoformat(),
+            "token_metadata": token_metadata,
+        }
+
+    access_token = normalize_bearer_token(raw_access_token)
+    if not access_token:
+        raise YorkshireWaterAuthError("Missing Yorkshire Water access token")
+    if token_looks_like_id_token(access_token):
+        raise YorkshireWaterAuthError(
+            "Pasted token looks like an id_token; paste the access_token instead"
+        )
+    return {
+        "access_token": access_token,
+        "token_expires_at": None,
+        "token_metadata": None,
     }
 
 
@@ -499,6 +573,7 @@ class YorkshireWaterAPI:
         bearer_token: str | None = None,
         account_reference: str | None = None,
         meter_reference: str | None = None,
+        token_expires_at: str | None = None,
     ) -> None:
         """Initialize the API client."""
         self._session = session
@@ -507,6 +582,7 @@ class YorkshireWaterAPI:
         self.meter_id = (meter_reference or meter_id or "").strip() or None
         self.account_reference = self.account_id
         self.meter_reference = self.meter_id
+        self.token_expires_at = token_expires_at
 
     @staticmethod
     def redact(value: Any) -> Any:
@@ -633,6 +709,8 @@ class YorkshireWaterAPI:
             raise YorkshireWaterEndpointNotConfiguredError(
                 "Yorkshire Water bearer token is not configured yet"
             )
+        if self.is_token_expired():
+            raise YorkshireWaterExpiredSessionError("Yorkshire Water bearer token expired")
 
         meter_reference = self.meter_reference
         meter_details: list[dict[str, Any]] = []
@@ -926,6 +1004,21 @@ class YorkshireWaterAPI:
             "last_successful_update": datetime.now().isoformat(timespec="seconds"),
             "status": "ok",
         }
+
+    def is_token_expired(self, now: datetime | None = None) -> bool:
+        """Return whether the configured temporary token is known expired."""
+        if not self.token_expires_at:
+            return False
+        now = now or datetime.now(UTC)
+        try:
+            expires_at = datetime.fromisoformat(self.token_expires_at)
+        except ValueError as err:
+            raise YorkshireWaterExpiredSessionError(
+                "Yorkshire Water bearer token expiry timestamp is invalid"
+            ) from err
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        return expires_at <= now
 
     async def async_fetch_current_consumption(self) -> dict[str, Any]:
         """Fetch current meter reading or consumption.

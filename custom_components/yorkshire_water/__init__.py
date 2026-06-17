@@ -26,6 +26,7 @@ from .const import (
     CONF_METER_ID,
     CONF_METER_REFERENCE,
     CONF_SESSION_TOKEN,
+    CONF_TOKEN_EXPIRES_AT,
     DEFAULT_SCAN_INTERVAL_HOURS,
     DOMAIN,
 )
@@ -50,13 +51,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         bearer_token=bearer_token,
         account_reference=entry.data.get(CONF_ACCOUNT_REFERENCE),
         meter_reference=entry.data.get(CONF_METER_REFERENCE),
+        token_expires_at=entry.data.get(CONF_TOKEN_EXPIRES_AT),
     )
 
     async def async_update_data() -> dict:
         """Fetch data from Yorkshire Water."""
         try:
             return await api.async_fetch_usage_summary()
-        except (YorkshireWaterExpiredSessionError, YorkshireWaterAuthError) as err:
+        except YorkshireWaterExpiredSessionError as err:
+            _LOGGER.warning("%s", err)
+            return {
+                "status": "token_expired",
+                "status_detail": "temporary_bearer_token_expired",
+                "account_configured": bool(api.account_reference),
+                "meter_configured": bool(api.meter_reference),
+            }
+        except YorkshireWaterAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except YorkshireWaterEndpointNotConfiguredError as err:
             _LOGGER.warning("%s", err)

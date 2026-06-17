@@ -11,9 +11,14 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 
+from .api import (
+    YorkshireWaterAuthError,
+    YorkshireWaterExpiredSessionError,
+    YorkshireWaterSchemaError,
+    build_token_auth_data,
+)
 from .const import (
     AUTH_TYPE_BEARER_TOKEN,
-    AUTH_TYPE_SESSION_TOKEN,
     CONF_ACCOUNT_ID,
     CONF_ACCOUNT_REFERENCE,
     CONF_AUTH_TYPE,
@@ -21,6 +26,8 @@ from .const import (
     CONF_METER_ID,
     CONF_METER_REFERENCE,
     CONF_SESSION_TOKEN,
+    CONF_TOKEN_EXPIRES_AT,
+    CONF_TOKEN_RESPONSE_JSON,
     DEFAULT_NAME,
     DOMAIN,
 )
@@ -46,6 +53,9 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             bearer_token = user_input.get(CONF_BEARER_TOKEN, "").strip() or None
             legacy_token = user_input.get(CONF_SESSION_TOKEN, "").strip() or None
+            token_response_json = (
+                user_input.get(CONF_TOKEN_RESPONSE_JSON, "").strip() or None
+            )
             account_reference = (
                 user_input.get(CONF_ACCOUNT_REFERENCE, "").strip()
                 or user_input.get(CONF_ACCOUNT_ID, "").strip()
@@ -57,35 +67,50 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 or None
             )
 
-            unique_source = meter_reference or account_reference
-            unique_id = (
-                "yw_" + hashlib.sha256(unique_source.encode()).hexdigest()[:12]
-                if unique_source
-                else DEFAULT_NAME.lower().replace(" ", "_")
-            )
-            await self.async_set_unique_id(unique_id)
-            self._abort_if_unique_id_configured()
+            try:
+                auth_data = build_token_auth_data(
+                    raw_access_token=bearer_token or legacy_token,
+                    token_response_json=token_response_json,
+                )
+            except YorkshireWaterExpiredSessionError:
+                errors["base"] = "token_expired"
+            except YorkshireWaterAuthError as err:
+                errors["base"] = (
+                    "id_token_supplied"
+                    if "id_token" in str(err)
+                    else "invalid_auth"
+                )
+            except YorkshireWaterSchemaError:
+                errors["base"] = "invalid_token_response"
+            else:
+                unique_source = meter_reference or account_reference
+                unique_id = (
+                    "yw_" + hashlib.sha256(unique_source.encode()).hexdigest()[:12]
+                    if unique_source
+                    else DEFAULT_NAME.lower().replace(" ", "_")
+                )
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured()
 
-            return self.async_create_entry(
-                title=DEFAULT_NAME,
-                data={
-                    CONF_AUTH_TYPE: AUTH_TYPE_BEARER_TOKEN
-                    if bearer_token
-                    else AUTH_TYPE_SESSION_TOKEN,
-                    CONF_BEARER_TOKEN: bearer_token or legacy_token,
-                    CONF_SESSION_TOKEN: legacy_token,
-                    CONF_ACCOUNT_REFERENCE: account_reference,
-                    CONF_METER_REFERENCE: meter_reference,
-                    CONF_ACCOUNT_ID: account_reference,
-                    CONF_METER_ID: meter_reference,
-                },
-            )
+                return self.async_create_entry(
+                    title=DEFAULT_NAME,
+                    data={
+                        CONF_AUTH_TYPE: AUTH_TYPE_BEARER_TOKEN,
+                        CONF_BEARER_TOKEN: auth_data["access_token"],
+                        CONF_TOKEN_EXPIRES_AT: auth_data["token_expires_at"],
+                        CONF_ACCOUNT_REFERENCE: account_reference,
+                        CONF_METER_REFERENCE: meter_reference,
+                        CONF_ACCOUNT_ID: account_reference,
+                        CONF_METER_ID: meter_reference,
+                    },
+                )
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
                     vol.Optional(CONF_BEARER_TOKEN): str,
+                    vol.Optional(CONF_TOKEN_RESPONSE_JSON): str,
                     vol.Optional(CONF_ACCOUNT_REFERENCE): str,
                     vol.Optional(CONF_METER_REFERENCE): str,
                 }
@@ -103,23 +128,40 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Update the temporary Yorkshire Water session token."""
+        """Update the temporary Yorkshire Water access token."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            bearer_token = user_input.get(CONF_BEARER_TOKEN, "").strip()
-            if not bearer_token:
-                errors["base"] = "invalid_auth"
-            elif self._reauth_entry is None:
-                _LOGGER.error("Reauthentication requested without a config entry")
-                return self.async_abort(reason="unknown")
+            bearer_token = user_input.get(CONF_BEARER_TOKEN, "").strip() or None
+            token_response_json = (
+                user_input.get(CONF_TOKEN_RESPONSE_JSON, "").strip() or None
+            )
+            try:
+                auth_data = build_token_auth_data(
+                    raw_access_token=bearer_token,
+                    token_response_json=token_response_json,
+                )
+            except YorkshireWaterExpiredSessionError:
+                errors["base"] = "token_expired"
+            except YorkshireWaterAuthError as err:
+                errors["base"] = (
+                    "id_token_supplied"
+                    if "id_token" in str(err)
+                    else "invalid_auth"
+                )
+            except YorkshireWaterSchemaError:
+                errors["base"] = "invalid_token_response"
             else:
+                if self._reauth_entry is None:
+                    _LOGGER.error("Reauthentication requested without a config entry")
+                    return self.async_abort(reason="unknown")
                 self.hass.config_entries.async_update_entry(
                     self._reauth_entry,
                     data={
                         **self._reauth_entry.data,
                         CONF_AUTH_TYPE: AUTH_TYPE_BEARER_TOKEN,
-                        CONF_BEARER_TOKEN: bearer_token,
+                        CONF_BEARER_TOKEN: auth_data["access_token"],
+                        CONF_TOKEN_EXPIRES_AT: auth_data["token_expires_at"],
                     },
                 )
                 await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
@@ -127,6 +169,11 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=vol.Schema({vol.Required(CONF_BEARER_TOKEN): str}),
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_BEARER_TOKEN): str,
+                    vol.Optional(CONF_TOKEN_RESPONSE_JSON): str,
+                }
+            ),
             errors=errors,
         )

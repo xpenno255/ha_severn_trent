@@ -11,6 +11,8 @@ CONF_BEARER_TOKEN = "bearer_token"
 CONF_METER_ID = "meter_id"
 CONF_METER_REFERENCE = "meter_reference"
 CONF_SESSION_TOKEN = "session_token"
+CONF_TOKEN_EXPIRES_AT = "token_expires_at"
+CONF_TOKEN_RESPONSE_JSON = "token_response_json"
 
 AUTH_TYPE_BEARER_TOKEN = "bearer_token"
 AUTH_TYPE_SESSION_TOKEN = "session_token"

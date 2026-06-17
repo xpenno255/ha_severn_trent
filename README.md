@@ -69,17 +69,18 @@ Restart Home Assistant, then add Yorkshire Water from Settings -> Devices & Serv
 
 ## Configuration
 
-The current config flow is a temporary beta development flow. It accepts:
+The current config flow is a temporary beta development flow. It accepts either:
 
-- Temporary bearer token from a current Yorkshire Water portal session
+- A raw temporary `access_token` from a current Yorkshire Water portal session
+- The full token response JSON from DevTools, containing `access_token`, `id_token`, `expires_in`, `token_type`, and `scope`
 - Optional account reference
 - Optional meter reference
 
-This is not a full OAuth login. Bearer tokens expire quickly and must be refreshed manually until OAuth PKCE login and refresh handling are implemented.
+This is not a full OAuth login. Access tokens expire quickly and must be refreshed manually until OAuth PKCE login and refresh handling are implemented. If you paste the full token response JSON, the integration stores the `access_token` for temporary API use and records a safe expiry timestamp so it can report `token_expired` instead of making doomed API calls. The `id_token` is ignored for API calls.
 
 If you provide an account reference but not a meter reference, the integration tries to discover the meter reference from the smart meter meter-details endpoint. If you provide neither reference, the integration remains in endpoint discovery mode.
 
-The integration stores the temporary token only in the Home Assistant config entry for now and redacts it in integration logs. Do not paste bearer tokens, account references, meter references, cookies, screenshots, or raw portal captures into GitHub issues or logs.
+The integration stores the temporary access token only in the Home Assistant config entry for now and redacts it in integration logs. Do not paste access tokens, ID tokens, full token responses, account references, meter references, cookies, screenshots, or raw portal captures into GitHub issues or logs.
 
 ## API Discovery Notes
 

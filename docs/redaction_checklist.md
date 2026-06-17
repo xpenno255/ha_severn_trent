@@ -17,11 +17,13 @@ Before sharing any Yorkshire Water portal capture, check every section below.
 
 ## Tokens
 
+- [ ] Treat full OAuth token responses as secret, even when they are JSON.
+- [ ] Remove `access_token` values.
+- [ ] Remove `id_token` values.
 - [ ] Remove bearer tokens.
-- [ ] Remove access tokens.
 - [ ] Remove refresh tokens.
-- [ ] Remove ID tokens.
 - [ ] Remove one-time codes, state values, nonce values, and session IDs.
+- [ ] Keep only safe metadata such as `expires_in`, `token_type`, and redacted scope if needed.
 
 ## Account Identifiers
 

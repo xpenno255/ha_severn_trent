@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+import base64
+from datetime import UTC, date, datetime
 import importlib.util
 import json
 from pathlib import Path
@@ -72,8 +73,63 @@ def _fixture(name: str):
     return json.loads((ROOT / "tests/fixtures/redacted_examples" / name).read_text())
 
 
+def _fake_jwt(payload: dict) -> str:
+    def encode(data: dict) -> str:
+        raw = json.dumps(data, separators=(",", ":")).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    return f"{encode({'alg': 'none'})}.{encode(payload)}.signature"
+
+
 async def _main() -> None:
     api = _load_api_module()
+
+    assert api.normalize_bearer_token("  'abc123'  ") == "abc123"
+    assert api.normalize_bearer_token('Bearer "abc123"') == "abc123"
+
+    token_json = json.dumps(
+        {
+            "id_token": _fake_jwt({"nonce": "REDACTED", "typ": "ID"}),
+            "access_token": "ACCESS-TOKEN-REDACTED",
+            "expires_in": 900,
+            "token_type": "Bearer",
+            "scope": "openid css-onlineaccount-api",
+        }
+    )
+    fixed_now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
+    auth_data = api.build_token_auth_data(
+        token_response_json=token_json,
+        now=fixed_now,
+    )
+    assert auth_data["access_token"] == "ACCESS-TOKEN-REDACTED"
+    assert auth_data["token_expires_at"] == "2026-06-17T12:15:00+00:00"
+    assert "id_token" not in auth_data
+    assert auth_data["token_metadata"]["has_id_token"] is True
+
+    expired_json = json.dumps(
+        {
+            "id_token": "TOKEN-REDACTED",
+            "access_token": "TOKEN-REDACTED",
+            "expires_in": -1,
+            "token_type": "Bearer",
+            "scope": "openid",
+        }
+    )
+    try:
+        api.build_token_auth_data(token_response_json=expired_json)
+    except api.YorkshireWaterExpiredSessionError:
+        pass
+    else:
+        raise AssertionError("Expected expired token response to be rejected")
+
+    try:
+        api.build_token_auth_data(
+            raw_access_token=_fake_jwt({"nonce": "REDACTED", "typ": "ID"})
+        )
+    except api.YorkshireWaterAuthError:
+        pass
+    else:
+        raise AssertionError("Expected ID token-looking input to be rejected")
 
     daily = api.parse_daily_consumption_response(_fixture("daily_usage_object_response.json"))
     assert daily[-1]["value_m3"] == 0.239
@@ -133,6 +189,19 @@ async def _main() -> None:
     yearly_summary = await yearly_client.async_fetch_usage_summary(today=date(2026, 6, 17))
     assert yearly_summary["year_to_date_litres"] == 5432
     assert yearly_summary["year_to_date_included_day_count"] == 2
+
+    expired_client = api.YorkshireWaterAPI(
+        _Session(),
+        "TOKEN-REDACTED",
+        account_reference="ACCOUNT-REDACTED",
+        token_expires_at="2000-01-01T00:00:00+00:00",
+    )
+    try:
+        await expired_client.async_fetch_usage_summary(today=date(2026, 6, 17))
+    except api.YorkshireWaterExpiredSessionError:
+        pass
+    else:
+        raise AssertionError("Expected expired API token to stop before requests")
 
     try:
         api.parse_daily_consumption_response(_fixture("monthly_summary_list_response.json"))
