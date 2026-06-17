@@ -18,6 +18,7 @@ from .api import (
     YorkshireWaterEndpointNotConfiguredError,
     YorkshireWaterError,
     YorkshireWaterExpiredSessionError,
+    YorkshireWaterRefreshUnavailableError,
 )
 from .const import (
     CONF_ACCOUNT_ID,
@@ -25,6 +26,7 @@ from .const import (
     CONF_BEARER_TOKEN,
     CONF_METER_ID,
     CONF_METER_REFERENCE,
+    CONF_REFRESH_TOKEN,
     CONF_SESSION_TOKEN,
     CONF_TOKEN_EXPIRES_AT,
     DEFAULT_SCAN_INTERVAL_HOURS,
@@ -52,17 +54,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         account_reference=entry.data.get(CONF_ACCOUNT_REFERENCE),
         meter_reference=entry.data.get(CONF_METER_REFERENCE),
         token_expires_at=entry.data.get(CONF_TOKEN_EXPIRES_AT),
+        refresh_token=entry.data.get(CONF_REFRESH_TOKEN),
     )
 
     async def async_update_data() -> dict:
         """Fetch data from Yorkshire Water."""
         try:
-            return await api.async_fetch_usage_summary()
+            data = await api.async_fetch_usage_summary()
+            if auth_update := api.consume_pending_auth_update():
+                hass.config_entries.async_update_entry(
+                    entry,
+                    data={
+                        **entry.data,
+                        CONF_BEARER_TOKEN: auth_update["access_token"],
+                        CONF_REFRESH_TOKEN: auth_update["refresh_token"],
+                        CONF_TOKEN_EXPIRES_AT: auth_update["token_expires_at"],
+                    },
+                )
+            return data
+        except YorkshireWaterRefreshUnavailableError as err:
+            _LOGGER.warning("%s", err)
+            return {
+                "status": "refresh_unavailable",
+                "status_detail": "reauth_required",
+                "token_status": "refresh_unavailable",
+                "account_configured": bool(api.account_reference),
+                "meter_configured": bool(api.meter_reference),
+            }
         except YorkshireWaterExpiredSessionError as err:
             _LOGGER.warning("%s", err)
             return {
                 "status": "token_expired",
                 "status_detail": "temporary_bearer_token_expired",
+                "token_status": "token_expired",
                 "account_configured": bool(api.account_reference),
                 "meter_configured": bool(api.meter_reference),
             }
@@ -73,6 +97,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return {
                 "status": "api_discovery_required",
                 "status_detail": str(err),
+                "token_status": "token_valid" if bearer_token else "reauth_required",
                 "account_configured": bool(api.account_reference),
                 "meter_configured": bool(api.meter_reference),
             }

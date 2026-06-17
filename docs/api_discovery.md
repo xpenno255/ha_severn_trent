@@ -52,6 +52,26 @@ Token exchange:
 }
 ```
 
+OAuth constants currently used by the integration foundation:
+
+```json
+{
+  "client_id": "css-onlineaccount-fe",
+  "token_endpoint": "https://login.yorkshirewater.com/connect/token",
+  "redirect_uri": "https://my.yorkshirewater.com/account/callback/response",
+  "scopes": [
+    "openid",
+    "user-names",
+    "css-onlineaccount-api",
+    "css-registration-api"
+  ]
+}
+```
+
+The authorization URL endpoint has not yet been confirmed from a safely redacted capture. Until that is captured, the config flow supports an experimental manual code exchange path where a user may paste a callback URL or authorization code plus the matching PKCE code verifier. Do not share either value publicly.
+
+If a future token response includes `refresh_token`, redact it like an access token. The integration can attempt a defensive refresh-token grant only when Yorkshire Water actually issues one.
+
 Smart meter API base:
 
 ```text
@@ -110,7 +130,7 @@ No browser cookies are required by the integration scaffold at this stage. Only 
 
 ## Captured Response Schemas
 
-Redacted token responses include `id_token`, `access_token`, `expires_in`, `token_type`, and `scope`. Parser code must not log or expose raw token values; it should keep only token presence and expiry metadata until auth storage is designed.
+Redacted token responses include `id_token`, `access_token`, `expires_in`, `token_type`, and `scope`. Some future responses may include `refresh_token`. Parser code must not log or expose raw token values; it should keep only token presence and expiry metadata in diagnostics or attributes.
 
 Redacted meter discovery responses have been captured with:
 

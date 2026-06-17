@@ -10,7 +10,7 @@ This integration is being adapted for Yorkshire Water's customer portal. The Hom
 - Component folder: `custom_components/yorkshire_water`
 - Integration name: Yorkshire Water
 - Repository: `https://github.com/Crash-Evans/ha_yorkshire_water`
-- API status: beta manual bearer token mode for captured smart meter endpoints; full OAuth PKCE login is not implemented yet
+- API status: beta manual bearer token mode plus experimental OAuth PKCE token exchange foundation for captured smart meter endpoints
 
 This is a new Home Assistant integration/domain. Add Yorkshire Water as a fresh integration.
 
@@ -92,18 +92,21 @@ Restart Home Assistant, then add Yorkshire Water from Settings -> Devices & Serv
 
 ## Configuration
 
-The current config flow is a temporary beta development flow. It accepts either:
+The current config flow is a beta development flow. It accepts:
 
 - A raw temporary `access_token` from a current Yorkshire Water portal session
 - The full token response JSON from DevTools, containing `access_token`, `id_token`, `expires_in`, `token_type`, and `scope`
+- Experimental OAuth PKCE token-exchange inputs: authorization code or callback URL, plus the matching PKCE code verifier
 - Optional account reference
 - Optional meter reference
 
-This is not a full OAuth login. Access tokens expire quickly and must be refreshed manually until OAuth PKCE login and refresh handling are implemented. If you paste the full token response JSON, the integration stores the `access_token` for temporary API use and records a safe expiry timestamp so it can report `token_expired` instead of making doomed API calls. The `id_token` is ignored for API calls.
+Access tokens expire quickly, typically after about 900 seconds. If you paste the full token response JSON, the integration stores the `access_token` for temporary API use and records a safe expiry timestamp so it can report `token_expired` or `refresh_unavailable` instead of making doomed API calls. The `id_token` is ignored for API calls.
+
+The OAuth PKCE foundation can exchange an authorization code at `https://login.yorkshirewater.com/connect/token` using the captured Yorkshire Water client ID and redirect URI. A fully automated browser login is not implemented yet because the authorization URL flow still needs more redacted portal capture. If Yorkshire Water includes a `refresh_token` in a token response, the integration stores it and attempts silent refresh before smart meter requests. If no `refresh_token` is present, reauthentication is required when the access token expires.
 
 If you provide an account reference but not a meter reference, the integration tries to discover the meter reference from the smart meter meter-details endpoint. If you provide neither reference, the integration remains in endpoint discovery mode.
 
-The integration stores the temporary access token only in the Home Assistant config entry for now and redacts it in integration logs. Do not paste access tokens, ID tokens, full token responses, account references, meter references, cookies, screenshots, or raw portal captures into GitHub issues or logs.
+The integration stores only the access token, optional refresh token, safe expiry timestamp, and configured account or meter references in the Home Assistant config entry. It redacts secrets in integration logs. Do not paste access tokens, ID tokens, refresh tokens, authorization codes, code verifiers, full token responses, account references, meter references, cookies, screenshots, or raw portal captures into GitHub issues or logs.
 
 ## API Discovery Notes
 

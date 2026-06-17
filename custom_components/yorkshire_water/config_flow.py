@@ -10,21 +10,30 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import (
+    YorkshireWaterAPI,
     YorkshireWaterAuthError,
     YorkshireWaterExpiredSessionError,
     YorkshireWaterSchemaError,
     build_token_auth_data,
+    extract_authorization_code,
+    validate_oauth_state,
 )
 from .const import (
     AUTH_TYPE_BEARER_TOKEN,
+    AUTH_TYPE_OAUTH_PKCE,
     CONF_ACCOUNT_ID,
     CONF_ACCOUNT_REFERENCE,
     CONF_AUTH_TYPE,
     CONF_BEARER_TOKEN,
     CONF_METER_ID,
     CONF_METER_REFERENCE,
+    CONF_OAUTH_AUTHORIZATION_CODE,
+    CONF_OAUTH_CALLBACK_URL,
+    CONF_OAUTH_CODE_VERIFIER,
+    CONF_REFRESH_TOKEN,
     CONF_SESSION_TOKEN,
     CONF_TOKEN_EXPIRES_AT,
     CONF_TOKEN_RESPONSE_JSON,
@@ -56,6 +65,15 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             token_response_json = (
                 user_input.get(CONF_TOKEN_RESPONSE_JSON, "").strip() or None
             )
+            oauth_callback = (
+                user_input.get(CONF_OAUTH_CALLBACK_URL, "").strip() or None
+            )
+            oauth_code = (
+                user_input.get(CONF_OAUTH_AUTHORIZATION_CODE, "").strip() or None
+            )
+            oauth_code_verifier = (
+                user_input.get(CONF_OAUTH_CODE_VERIFIER, "").strip() or None
+            )
             account_reference = (
                 user_input.get(CONF_ACCOUNT_REFERENCE, "").strip()
                 or user_input.get(CONF_ACCOUNT_ID, "").strip()
@@ -68,9 +86,11 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
             try:
-                auth_data = build_token_auth_data(
+                auth_data, auth_type = await self._async_build_auth_data(
                     raw_access_token=bearer_token or legacy_token,
                     token_response_json=token_response_json,
+                    oauth_callback_or_code=oauth_callback or oauth_code,
+                    oauth_code_verifier=oauth_code_verifier,
                 )
             except YorkshireWaterExpiredSessionError:
                 errors["base"] = "token_expired"
@@ -78,6 +98,8 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = (
                     "id_token_supplied"
                     if "id_token" in str(err)
+                    else "invalid_oauth"
+                    if oauth_callback or oauth_code or oauth_code_verifier
                     else "invalid_auth"
                 )
             except YorkshireWaterSchemaError:
@@ -95,8 +117,9 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_create_entry(
                     title=DEFAULT_NAME,
                     data={
-                        CONF_AUTH_TYPE: AUTH_TYPE_BEARER_TOKEN,
+                        CONF_AUTH_TYPE: auth_type,
                         CONF_BEARER_TOKEN: auth_data["access_token"],
+                        CONF_REFRESH_TOKEN: auth_data.get("refresh_token"),
                         CONF_TOKEN_EXPIRES_AT: auth_data["token_expires_at"],
                         CONF_ACCOUNT_REFERENCE: account_reference,
                         CONF_METER_REFERENCE: meter_reference,
@@ -111,6 +134,9 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Optional(CONF_BEARER_TOKEN): str,
                     vol.Optional(CONF_TOKEN_RESPONSE_JSON): str,
+                    vol.Optional(CONF_OAUTH_CALLBACK_URL): str,
+                    vol.Optional(CONF_OAUTH_AUTHORIZATION_CODE): str,
+                    vol.Optional(CONF_OAUTH_CODE_VERIFIER): str,
                     vol.Optional(CONF_ACCOUNT_REFERENCE): str,
                     vol.Optional(CONF_METER_REFERENCE): str,
                 }
@@ -136,10 +162,21 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             token_response_json = (
                 user_input.get(CONF_TOKEN_RESPONSE_JSON, "").strip() or None
             )
+            oauth_callback = (
+                user_input.get(CONF_OAUTH_CALLBACK_URL, "").strip() or None
+            )
+            oauth_code = (
+                user_input.get(CONF_OAUTH_AUTHORIZATION_CODE, "").strip() or None
+            )
+            oauth_code_verifier = (
+                user_input.get(CONF_OAUTH_CODE_VERIFIER, "").strip() or None
+            )
             try:
-                auth_data = build_token_auth_data(
+                auth_data, auth_type = await self._async_build_auth_data(
                     raw_access_token=bearer_token,
                     token_response_json=token_response_json,
+                    oauth_callback_or_code=oauth_callback or oauth_code,
+                    oauth_code_verifier=oauth_code_verifier,
                 )
             except YorkshireWaterExpiredSessionError:
                 errors["base"] = "token_expired"
@@ -147,6 +184,8 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = (
                     "id_token_supplied"
                     if "id_token" in str(err)
+                    else "invalid_oauth"
+                    if oauth_callback or oauth_code or oauth_code_verifier
                     else "invalid_auth"
                 )
             except YorkshireWaterSchemaError:
@@ -159,8 +198,9 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._reauth_entry,
                     data={
                         **self._reauth_entry.data,
-                        CONF_AUTH_TYPE: AUTH_TYPE_BEARER_TOKEN,
+                        CONF_AUTH_TYPE: auth_type,
                         CONF_BEARER_TOKEN: auth_data["access_token"],
+                        CONF_REFRESH_TOKEN: auth_data.get("refresh_token"),
                         CONF_TOKEN_EXPIRES_AT: auth_data["token_expires_at"],
                     },
                 )
@@ -173,7 +213,45 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Optional(CONF_BEARER_TOKEN): str,
                     vol.Optional(CONF_TOKEN_RESPONSE_JSON): str,
+                    vol.Optional(CONF_OAUTH_CALLBACK_URL): str,
+                    vol.Optional(CONF_OAUTH_AUTHORIZATION_CODE): str,
+                    vol.Optional(CONF_OAUTH_CODE_VERIFIER): str,
                 }
             ),
             errors=errors,
+        )
+
+    async def _async_build_auth_data(
+        self,
+        *,
+        raw_access_token: str | None = None,
+        token_response_json: str | None = None,
+        oauth_callback_or_code: str | None = None,
+        oauth_code_verifier: str | None = None,
+    ) -> tuple[dict[str, Any], str]:
+        """Build auth data from manual beta or experimental OAuth inputs."""
+        if oauth_callback_or_code or oauth_code_verifier:
+            if not oauth_callback_or_code or not oauth_code_verifier:
+                raise YorkshireWaterAuthError(
+                    "Yorkshire Water OAuth code and code verifier are required"
+                )
+            code, returned_state = extract_authorization_code(oauth_callback_or_code)
+            expected_state = self.context.get("oauth_state")
+            validate_oauth_state(returned_state, expected_state)
+            api = YorkshireWaterAPI(
+                async_get_clientsession(self.hass),
+                session_token=None,
+            )
+            auth_data = await api.async_exchange_authorization_code(
+                code,
+                oauth_code_verifier,
+            )
+            return auth_data, AUTH_TYPE_OAUTH_PKCE
+
+        return (
+            build_token_auth_data(
+                raw_access_token=raw_access_token,
+                token_response_json=token_response_json,
+            ),
+            AUTH_TYPE_BEARER_TOKEN,
         )

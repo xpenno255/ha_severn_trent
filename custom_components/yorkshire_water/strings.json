@@ -3,26 +3,33 @@
     "step": {
       "user": {
         "title": "Yorkshire Water",
-        "description": "Beta development setup: paste either a temporary Yorkshire Water access token or the full token response JSON from DevTools. Optional account and meter references can be supplied if known. Token responses contain secrets; do not share them.",
+        "description": "Beta development setup: paste either a temporary Yorkshire Water access token, the full token response JSON from DevTools, or experimental OAuth authorization-code details. Optional account and meter references can be supplied if known. Tokens, authorization codes, and code verifiers contain secrets; do not share them.",
         "data": {
           "bearer_token": "Temporary access token",
           "token_response_json": "Full token response JSON",
+          "oauth_callback_url": "OAuth callback URL",
+          "oauth_authorization_code": "OAuth authorization code",
+          "oauth_code_verifier": "OAuth PKCE code verifier",
           "account_reference": "Account reference",
           "meter_reference": "Meter reference"
         }
       },
       "reauth_confirm": {
         "title": "Reauthenticate Yorkshire Water",
-        "description": "Paste a fresh temporary Yorkshire Water access token or full token response JSON.",
+        "description": "Paste a fresh temporary Yorkshire Water access token, full token response JSON, or experimental OAuth authorization-code details.",
         "data": {
           "bearer_token": "Temporary access token",
-          "token_response_json": "Full token response JSON"
+          "token_response_json": "Full token response JSON",
+          "oauth_callback_url": "OAuth callback URL",
+          "oauth_authorization_code": "OAuth authorization code",
+          "oauth_code_verifier": "OAuth PKCE code verifier"
         }
       }
     },
     "error": {
       "invalid_auth": "Enter a valid access token",
       "invalid_token_response": "Enter a valid token response JSON object",
+      "invalid_oauth": "Enter valid experimental OAuth callback/code details",
       "id_token_supplied": "This looks like an ID token. Paste the access_token value instead.",
       "token_expired": "The supplied token response is already expired",
       "unknown": "Unexpected error occurred"

@@ -10,11 +10,16 @@ CONF_AUTH_TYPE = "auth_type"
 CONF_BEARER_TOKEN = "bearer_token"
 CONF_METER_ID = "meter_id"
 CONF_METER_REFERENCE = "meter_reference"
+CONF_OAUTH_AUTHORIZATION_CODE = "oauth_authorization_code"
+CONF_OAUTH_CALLBACK_URL = "oauth_callback_url"
+CONF_OAUTH_CODE_VERIFIER = "oauth_code_verifier"
+CONF_REFRESH_TOKEN = "refresh_token"
 CONF_SESSION_TOKEN = "session_token"
 CONF_TOKEN_EXPIRES_AT = "token_expires_at"
 CONF_TOKEN_RESPONSE_JSON = "token_response_json"
 
 AUTH_TYPE_BEARER_TOKEN = "bearer_token"
+AUTH_TYPE_OAUTH_PKCE = "oauth_pkce"
 AUTH_TYPE_SESSION_TOKEN = "session_token"
 
 DEFAULT_NAME = "Yorkshire Water"
@@ -24,6 +29,16 @@ DEFAULT_SCAN_INTERVAL_HOURS = 6
 # so production data fetch methods remain disabled below until redacted response
 # JSON structures are supplied.
 YORKSHIRE_WATER_TOKEN_ENDPOINT = "https://login.yorkshirewater.com/connect/token"
+YORKSHIRE_WATER_OAUTH_CLIENT_ID = "css-onlineaccount-fe"
+YORKSHIRE_WATER_OAUTH_REDIRECT_URI = (
+    "https://my.yorkshirewater.com/account/callback/response"
+)
+YORKSHIRE_WATER_OAUTH_SCOPES = (
+    "openid",
+    "user-names",
+    "css-onlineaccount-api",
+    "css-registration-api",
+)
 YORKSHIRE_WATER_SMART_METER_API_BASE_URL = (
     "https://my.yorkshirewater.com/api/account/smartmeter"
 )

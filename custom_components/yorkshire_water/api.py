@@ -5,13 +5,19 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+import hashlib
 import json
 import logging
+import secrets
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from aiohttp import ClientError, ClientResponse, ClientSession
 
 from .const import (
+    YORKSHIRE_WATER_OAUTH_CLIENT_ID,
+    YORKSHIRE_WATER_OAUTH_REDIRECT_URI,
+    YORKSHIRE_WATER_OAUTH_SCOPES,
     YORKSHIRE_WATER_API_BASE_URL,
     YORKSHIRE_WATER_CURRENT_CONSUMPTION_ENDPOINT_PATH,
     YORKSHIRE_WATER_CURRENT_CONSUMPTION_PATH,
@@ -108,6 +114,14 @@ class YorkshireWaterEndpointNotConfiguredError(YorkshireWaterError):
     """Yorkshire Water endpoint details have not been captured yet."""
 
 
+class YorkshireWaterRefreshUnavailableError(YorkshireWaterExpiredSessionError):
+    """The access token expired and no refresh path is available."""
+
+
+class YorkshireWaterStateMismatchError(YorkshireWaterAuthError):
+    """OAuth state did not match the expected value."""
+
+
 def parse_token_response(data: dict[str, Any]) -> dict[str, Any]:
     """Parse OAuth token response metadata without returning raw token values."""
     _ensure_dict(data, "Token response payload")
@@ -124,6 +138,7 @@ def parse_token_response(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "has_id_token": bool(data.get("id_token")),
         "has_access_token": bool(data.get("access_token")),
+        "has_refresh_token": bool(data.get("refresh_token")),
         "expires_in": expires_in_seconds,
         "expires_at": expires_at.isoformat(),
         "token_type": data.get("token_type"),
@@ -183,6 +198,7 @@ def build_token_auth_data(
 
         return {
             "access_token": access_token,
+            "refresh_token": normalize_bearer_token(token_response.get("refresh_token")),
             "token_expires_at": expires_at.isoformat(),
             "token_metadata": token_metadata,
         }
@@ -196,8 +212,96 @@ def build_token_auth_data(
         )
     return {
         "access_token": access_token,
+        "refresh_token": None,
         "token_expires_at": None,
         "token_metadata": None,
+    }
+
+
+def generate_pkce_code_verifier() -> str:
+    """Generate a secure PKCE code verifier."""
+    return secrets.token_urlsafe(64)[:128]
+
+
+def generate_pkce_code_challenge(code_verifier: str) -> str:
+    """Generate a S256 PKCE code challenge."""
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def generate_oauth_state() -> str:
+    """Generate a secure OAuth state value."""
+    return secrets.token_urlsafe(32)
+
+
+def validate_oauth_state(returned_state: str | None, expected_state: str | None) -> None:
+    """Validate a returned OAuth state value when an expected state exists."""
+    if expected_state and returned_state != expected_state:
+        raise YorkshireWaterStateMismatchError("Yorkshire Water OAuth state did not match")
+
+
+def extract_authorization_code(callback_url_or_code: str) -> tuple[str, str | None]:
+    """Extract an authorization code and optional state from a callback URL or raw code."""
+    value = callback_url_or_code.strip()
+    if not value:
+        raise YorkshireWaterAuthError("Missing Yorkshire Water authorization code")
+    parsed = urlparse(value)
+    if parsed.query:
+        query = parse_qs(parsed.query)
+        code = (query.get("code") or [""])[0]
+        state = (query.get("state") or [None])[0]
+        if not code:
+            raise YorkshireWaterAuthError("Yorkshire Water callback URL did not include a code")
+        return code, state
+    return value, None
+
+
+def build_token_exchange_body(
+    authorization_code: str,
+    code_verifier: str,
+    *,
+    redirect_uri: str = YORKSHIRE_WATER_OAUTH_REDIRECT_URI,
+    client_id: str = YORKSHIRE_WATER_OAUTH_CLIENT_ID,
+) -> dict[str, str]:
+    """Build a token exchange body without logging sensitive values."""
+    return {
+        "client_id": client_id,
+        "grant_type": "authorization_code",
+        "redirect_uri": redirect_uri,
+        "code": authorization_code,
+        "code_verifier": code_verifier,
+    }
+
+
+def build_oauth_authorization_params(
+    code_challenge: str,
+    state: str,
+    *,
+    client_id: str = YORKSHIRE_WATER_OAUTH_CLIENT_ID,
+    redirect_uri: str = YORKSHIRE_WATER_OAUTH_REDIRECT_URI,
+) -> dict[str, str]:
+    """Build OAuth authorization query parameters for a captured authorize endpoint."""
+    return {
+        "client_id": client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "scope": " ".join(YORKSHIRE_WATER_OAUTH_SCOPES),
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+        "state": state,
+    }
+
+
+def build_refresh_token_body(
+    refresh_token: str,
+    *,
+    client_id: str = YORKSHIRE_WATER_OAUTH_CLIENT_ID,
+) -> dict[str, str]:
+    """Build a refresh-token body without logging sensitive values."""
+    return {
+        "client_id": client_id,
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
     }
 
 
@@ -574,6 +678,7 @@ class YorkshireWaterAPI:
         account_reference: str | None = None,
         meter_reference: str | None = None,
         token_expires_at: str | None = None,
+        refresh_token: str | None = None,
     ) -> None:
         """Initialize the API client."""
         self._session = session
@@ -583,6 +688,8 @@ class YorkshireWaterAPI:
         self.account_reference = self.account_id
         self.meter_reference = self.meter_id
         self.token_expires_at = token_expires_at
+        self.refresh_token = refresh_token
+        self._pending_auth_update: dict[str, Any] | None = None
         self._last_estimated_cumulative_usage_m3: float | None = None
         self._last_estimated_cumulative_total_litres: float | None = None
 
@@ -607,31 +714,112 @@ class YorkshireWaterAPI:
         authorization_code: str,
         code_verifier: str,
         *,
-        redirect_uri: str = "https://my.yorkshirewater.com/account/callback/response",
-        client_id: str = "css-onlineaccount-fe",
+        redirect_uri: str = YORKSHIRE_WATER_OAUTH_REDIRECT_URI,
+        client_id: str = YORKSHIRE_WATER_OAUTH_CLIENT_ID,
+        now: datetime | None = None,
     ) -> dict[str, Any]:
-        """Placeholder for the discovered OAuth authorization-code exchange.
-
-        TODO: Implement once token response handling and Home Assistant config
-        flow storage are designed. Do not log raw authorization codes, code
-        verifiers, access tokens, refresh tokens, or cookies.
-        """
-        form_shape = {
-            "client_id": client_id,
-            "grant_type": "authorization_code",
-            "redirect_uri": redirect_uri,
-            "code": authorization_code,
-            "code_verifier": code_verifier,
-        }
+        """Exchange an OAuth authorization code for an access token."""
+        form = build_token_exchange_body(
+            authorization_code,
+            code_verifier,
+            redirect_uri=redirect_uri,
+            client_id=client_id,
+        )
         _LOGGER.debug(
-            "Yorkshire Water token route discovered: endpoint=%s content_type=%s form=%s",
+            "Yorkshire Water token exchange request: endpoint=%s content_type=%s form=%s",
             YORKSHIRE_WATER_TOKEN_ENDPOINT,
             "application/x-www-form-urlencoded",
-            self.redact(form_shape),
+            self.redact(form),
         )
-        raise YorkshireWaterEndpointNotConfiguredError(
-            "Yorkshire Water OAuth token exchange is discovered but not implemented yet"
+        payload = await self._async_post_token_form(
+            "token_exchange",
+            form,
         )
+        auth_data = build_token_auth_data(
+            token_response_json=json.dumps(payload),
+            now=now,
+        )
+        self._apply_auth_data(auth_data)
+        return auth_data
+
+    async def async_refresh_access_token(
+        self,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Refresh an expired access token when Yorkshire Water issued a refresh token."""
+        if not self.refresh_token:
+            raise YorkshireWaterRefreshUnavailableError(
+                "Yorkshire Water access token expired and refresh is unavailable"
+            )
+        form = build_refresh_token_body(self.refresh_token)
+        _LOGGER.debug(
+            "Yorkshire Water token refresh request: endpoint=%s content_type=%s form=%s",
+            YORKSHIRE_WATER_TOKEN_ENDPOINT,
+            "application/x-www-form-urlencoded",
+            self.redact(form),
+        )
+        payload = await self._async_post_token_form(
+            "token_refresh",
+            form,
+        )
+        auth_data = build_token_auth_data(
+            token_response_json=json.dumps(payload),
+            now=now,
+        )
+        self._apply_auth_data(auth_data)
+        return auth_data
+
+    async def _async_post_token_form(
+        self,
+        endpoint_label: str,
+        form: dict[str, str],
+    ) -> dict[str, Any]:
+        """POST to the token endpoint without exposing form values."""
+        try:
+            async with self._session.request(
+                "POST",
+                YORKSHIRE_WATER_TOKEN_ENDPOINT,
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                data=form,
+                timeout=30,
+            ) as response:
+                await self._raise_for_status(response)
+                status = response.status
+                payload = await response.json(content_type=None)
+        except ClientError as err:
+            raise YorkshireWaterError(f"Error communicating with Yorkshire Water: {err}") from err
+
+        _ensure_response_shape(endpoint_label, payload, dict)
+        _LOGGER.debug(
+            "Yorkshire Water token response: %s status=%s top_level=%s",
+            endpoint_label,
+            status,
+            _json_type_name(payload),
+        )
+        return payload
+
+    def _apply_auth_data(self, auth_data: dict[str, Any]) -> None:
+        """Apply new auth data in memory and queue a safe config entry update."""
+        self._session_token = auth_data["access_token"]
+        self.token_expires_at = auth_data["token_expires_at"]
+        refresh_token = auth_data.get("refresh_token")
+        if refresh_token:
+            self.refresh_token = refresh_token
+        self._pending_auth_update = {
+            "access_token": self._session_token,
+            "refresh_token": self.refresh_token,
+            "token_expires_at": self.token_expires_at,
+        }
+
+    def consume_pending_auth_update(self) -> dict[str, Any] | None:
+        """Return and clear any refreshed token data that should be persisted."""
+        update = self._pending_auth_update
+        self._pending_auth_update = None
+        return update
 
     async def async_get_meter_details(self, account_reference: str) -> dict[str, Any]:
         """Fetch meter details for an account reference."""
@@ -711,8 +899,7 @@ class YorkshireWaterAPI:
             raise YorkshireWaterEndpointNotConfiguredError(
                 "Yorkshire Water bearer token is not configured yet"
             )
-        if self.is_token_expired():
-            raise YorkshireWaterExpiredSessionError("Yorkshire Water bearer token expired")
+        await self.async_ensure_valid_token()
 
         meter_reference = self.meter_reference
         meter_details: list[dict[str, Any]] = []
@@ -1030,6 +1217,7 @@ class YorkshireWaterAPI:
             "account_configured": bool(self.account_reference),
             "last_successful_update": datetime.now().isoformat(timespec="seconds"),
             "status": "ok",
+            "token_status": "token_valid",
         }
 
     def _estimated_cumulative_usage(
@@ -1085,6 +1273,17 @@ class YorkshireWaterAPI:
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=UTC)
         return expires_at <= now
+
+    async def async_ensure_valid_token(self) -> None:
+        """Refresh an expired token when possible, otherwise raise a safe auth error."""
+        if not self.is_token_expired():
+            return
+        if self.refresh_token:
+            await self.async_refresh_access_token()
+            return
+        raise YorkshireWaterRefreshUnavailableError(
+            "Yorkshire Water access token expired and refresh is unavailable"
+        )
 
     async def async_fetch_current_consumption(self) -> dict[str, Any]:
         """Fetch current meter reading or consumption.

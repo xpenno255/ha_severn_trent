@@ -55,11 +55,25 @@ class _Session:
         self,
         usage_fixture: str = "monthly_summary_list_response.json",
         daily_fixture: str = "daily_usage_object_response.json",
+        token_payload=None,
     ) -> None:
         self.usage_fixture = usage_fixture
         self.daily_fixture = daily_fixture
+        self.token_payload = token_payload or {
+            "id_token": "TOKEN-REDACTED",
+            "access_token": "ACCESS-TOKEN-REDACTED",
+            "expires_in": 900,
+            "token_type": "Bearer",
+            "scope": "openid css-onlineaccount-api",
+        }
+        self.token_requests: list[dict] = []
 
-    def request(self, method, url, headers=None, params=None, timeout=None):
+    def request(self, method, url, headers=None, params=None, data=None, timeout=None):
+        if "connect/token" in url:
+            assert method == "POST"
+            assert headers["Content-Type"] == "application/x-www-form-urlencoded"
+            self.token_requests.append(data)
+            return _Response(self.token_payload)
         if "meter-details" in url:
             return _Response(_fixture("meter_discovery_response.json"))
         if "current-consumption" in url:
@@ -92,11 +106,60 @@ async def _main() -> None:
 
     assert api.normalize_bearer_token("  'abc123'  ") == "abc123"
     assert api.normalize_bearer_token('Bearer "abc123"') == "abc123"
+    verifier = api.generate_pkce_code_verifier()
+    challenge = api.generate_pkce_code_challenge(verifier)
+    assert 43 <= len(verifier) <= 128
+    assert len(challenge) == 43
+    assert api.generate_oauth_state() != api.generate_oauth_state()
+    auth_params = api.build_oauth_authorization_params(challenge, "STATE-REDACTED")
+    assert auth_params["client_id"] == "css-onlineaccount-fe"
+    assert auth_params["response_type"] == "code"
+    assert auth_params["code_challenge"] == challenge
+    assert auth_params["code_challenge_method"] == "S256"
+    assert auth_params["state"] == "STATE-REDACTED"
+    assert "css-onlineaccount-api" in auth_params["scope"]
+    api.validate_oauth_state("STATE-REDACTED", "STATE-REDACTED")
+    try:
+        api.validate_oauth_state("STATE-REDACTED", "STATE-MISMATCH-REDACTED")
+    except api.YorkshireWaterStateMismatchError:
+        pass
+    else:
+        raise AssertionError("Expected mismatched OAuth state to be rejected")
+    code, state = api.extract_authorization_code(
+        "https://my.yorkshirewater.com/account/callback/response?"
+        "code=AUTH-CODE-REDACTED&state=STATE-REDACTED"
+    )
+    assert code == "AUTH-CODE-REDACTED"
+    assert state == "STATE-REDACTED"
+    assert api.extract_authorization_code("AUTH-CODE-REDACTED") == (
+        "AUTH-CODE-REDACTED",
+        None,
+    )
+    exchange_body = api.build_token_exchange_body(
+        "AUTH-CODE-REDACTED",
+        "CODE-VERIFIER-REDACTED",
+    )
+    assert exchange_body == {
+        "client_id": "css-onlineaccount-fe",
+        "grant_type": "authorization_code",
+        "redirect_uri": "https://my.yorkshirewater.com/account/callback/response",
+        "code": "AUTH-CODE-REDACTED",
+        "code_verifier": "CODE-VERIFIER-REDACTED",
+    }
+    assert api.build_refresh_token_body("TOKEN-REDACTED") == {
+        "client_id": "css-onlineaccount-fe",
+        "grant_type": "refresh_token",
+        "refresh_token": "TOKEN-REDACTED",
+    }
+    redacted = api.YorkshireWaterAPI.redact(exchange_body)
+    assert redacted["code"] == "<redacted>"
+    assert redacted["code_verifier"] == "<redacted>"
 
     token_json = json.dumps(
         {
             "id_token": _fake_jwt({"nonce": "REDACTED", "typ": "ID"}),
             "access_token": "ACCESS-TOKEN-REDACTED",
+            "refresh_token": "TOKEN-REDACTED",
             "expires_in": 900,
             "token_type": "Bearer",
             "scope": "openid css-onlineaccount-api",
@@ -108,9 +171,36 @@ async def _main() -> None:
         now=fixed_now,
     )
     assert auth_data["access_token"] == "ACCESS-TOKEN-REDACTED"
+    assert auth_data["refresh_token"] == "TOKEN-REDACTED"
     assert auth_data["token_expires_at"] == "2026-06-17T12:15:00+00:00"
     assert "id_token" not in auth_data
     assert auth_data["token_metadata"]["has_id_token"] is True
+    assert auth_data["token_metadata"]["has_refresh_token"] is True
+
+    no_refresh_auth_data = api.build_token_auth_data(
+        token_response_json=json.dumps(
+            {
+                "id_token": "TOKEN-REDACTED",
+                "access_token": "ACCESS-TOKEN-REDACTED",
+                "expires_in": 900,
+                "token_type": "Bearer",
+                "scope": "openid",
+            }
+        ),
+        now=fixed_now,
+    )
+    assert no_refresh_auth_data["refresh_token"] is None
+    assert no_refresh_auth_data["token_metadata"]["has_refresh_token"] is False
+
+    token_session = _Session()
+    token_client = api.YorkshireWaterAPI(token_session, None)
+    exchanged = await token_client.async_exchange_authorization_code(
+        "AUTH-CODE-REDACTED",
+        "CODE-VERIFIER-REDACTED",
+        now=fixed_now,
+    )
+    assert exchanged["access_token"] == "ACCESS-TOKEN-REDACTED"
+    assert token_session.token_requests[-1] == exchange_body
 
     expired_json = json.dumps(
         {
@@ -258,10 +348,40 @@ async def _main() -> None:
     )
     try:
         await expired_client.async_fetch_usage_summary(today=date(2026, 6, 17))
-    except api.YorkshireWaterExpiredSessionError:
-        pass
+    except api.YorkshireWaterRefreshUnavailableError as err:
+        assert "TOKEN-REDACTED" not in str(err)
+        assert "TOKEN-REDACTED" not in str(err)
     else:
         raise AssertionError("Expected expired API token to stop before requests")
+
+    refresh_session = _Session(
+        token_payload={
+            "id_token": "TOKEN-REDACTED",
+            "access_token": "ACCESS-TOKEN-REDACTED",
+            "expires_in": 900,
+            "token_type": "Bearer",
+            "scope": "openid css-onlineaccount-api",
+        }
+    )
+    refresh_client = api.YorkshireWaterAPI(
+        refresh_session,
+        "TOKEN-REDACTED",
+        account_reference="ACCOUNT-REDACTED",
+        token_expires_at="2000-01-01T00:00:00+00:00",
+        refresh_token="TOKEN-REDACTED",
+    )
+    refreshed_summary = await refresh_client.async_fetch_usage_summary(
+        today=date(2026, 6, 17)
+    )
+    assert refreshed_summary["status"] == "ok"
+    assert refresh_session.token_requests[0] == {
+        "client_id": "css-onlineaccount-fe",
+        "grant_type": "refresh_token",
+        "refresh_token": "TOKEN-REDACTED",
+    }
+    pending_auth = refresh_client.consume_pending_auth_update()
+    assert pending_auth["access_token"] == "ACCESS-TOKEN-REDACTED"
+    assert pending_auth["refresh_token"] == "TOKEN-REDACTED"
 
     try:
         api.parse_daily_consumption_response(_fixture("monthly_summary_list_response.json"))
