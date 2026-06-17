@@ -583,6 +583,8 @@ class YorkshireWaterAPI:
         self.account_reference = self.account_id
         self.meter_reference = self.meter_id
         self.token_expires_at = token_expires_at
+        self._last_estimated_cumulative_usage_m3: float | None = None
+        self._last_estimated_cumulative_total_litres: float | None = None
 
     @staticmethod
     def redact(value: Any) -> Any:
@@ -831,6 +833,11 @@ class YorkshireWaterAPI:
         )
         year_to_date_periods = yearly_periods
         year_to_date_litres = _total_from_periods(year_to_date_periods)
+        estimated_cumulative = self._estimated_cumulative_usage(
+            yearly_periods,
+            monthly_periods,
+            daily_periods,
+        )
 
         return {
             "daily_periods": [_usage_period_as_dict(period) for period in recent_periods],
@@ -965,6 +972,26 @@ class YorkshireWaterAPI:
             "meter_reading_estimated": None,
             "meter_reading_date": None,
             "meter_reading_status": "not_implemented",
+            "estimated_cumulative_usage_m3": estimated_cumulative["value_m3"],
+            "estimated_cumulative_source": estimated_cumulative["source"],
+            "estimated_cumulative_raw_unit": "L",
+            "estimated_cumulative_unit": "m³",
+            "estimated_cumulative_total_litres": estimated_cumulative["total_litres"],
+            "estimated_cumulative_source_total_litres": estimated_cumulative[
+                "source_total_litres"
+            ],
+            "estimated_cumulative_earliest_source_date": estimated_cumulative[
+                "earliest_source_date"
+            ],
+            "estimated_cumulative_latest_source_date": estimated_cumulative[
+                "latest_source_date"
+            ],
+            "estimated_cumulative_included_day_count": estimated_cumulative[
+                "included_day_count"
+            ],
+            "estimated_cumulative_estimated": True,
+            "estimated_cumulative_energy_dashboard_compatible": True,
+            "estimated_cumulative_status_detail": estimated_cumulative["status_detail"],
             "continuous_flow_alarm": _first_non_none(
                 _first_present(
                     current_reading,
@@ -1003,6 +1030,45 @@ class YorkshireWaterAPI:
             "account_configured": bool(self.account_reference),
             "last_successful_update": datetime.now().isoformat(timespec="seconds"),
             "status": "ok",
+        }
+
+    def _estimated_cumulative_usage(
+        self,
+        yearly_periods: list[dict[str, Any]],
+        monthly_periods: list[dict[str, Any]],
+        daily_periods: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Build a monotonic estimated cumulative usage value from usage totals."""
+        source = "estimated_from_usage"
+        periods = yearly_periods or monthly_periods or daily_periods
+        source_total_litres = _total_from_periods(periods)
+        status_detail = "ok" if source_total_litres is not None else "usage_data_unavailable"
+
+        value_m3: float | None = None
+        total_litres: float | None = None
+        if source_total_litres is not None:
+            value_m3 = round(source_total_litres / 1000, 3)
+            total_litres = source_total_litres
+            if (
+                self._last_estimated_cumulative_usage_m3 is not None
+                and value_m3 < self._last_estimated_cumulative_usage_m3
+            ):
+                value_m3 = self._last_estimated_cumulative_usage_m3
+                total_litres = self._last_estimated_cumulative_total_litres
+                status_detail = "preserved_previous_value_source_total_decreased"
+            else:
+                self._last_estimated_cumulative_usage_m3 = value_m3
+                self._last_estimated_cumulative_total_litres = total_litres
+
+        return {
+            "source": source,
+            "value_m3": value_m3,
+            "total_litres": total_litres,
+            "source_total_litres": source_total_litres,
+            "earliest_source_date": _period_boundary(periods, "start_date", min),
+            "latest_source_date": _period_boundary(periods, "end_date", max),
+            "included_day_count": len(periods) if periods else 0,
+            "status_detail": status_detail,
         }
 
     def is_token_expired(self, now: datetime | None = None) -> bool:
@@ -1485,6 +1551,22 @@ def _total_from_periods(periods: list[dict[str, Any]]) -> float | None:
     """Total litre values from normalized periods."""
     values = [period["value_litres"] for period in periods if period["value_litres"] is not None]
     return round(sum(values), 2) if values else None
+
+
+def _period_boundary(
+    periods: list[dict[str, Any]],
+    key: str,
+    selector: Any,
+) -> str | None:
+    """Return an ISO date boundary from normalized periods."""
+    values = [
+        period[key]
+        for period in periods
+        if isinstance(period.get(key), date) and period[key] != date.min
+    ]
+    if not values:
+        return None
+    return selector(values).isoformat()
 
 
 def _monthly_total_for_month(periods: list[dict[str, Any]], today: date) -> float | None:

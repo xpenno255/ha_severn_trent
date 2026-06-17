@@ -28,6 +28,7 @@ The initial Yorkshire Water sensor set is intentionally practical:
 | Month to Date | `sensor.yorkshire_water_month_to_date` | L |
 | Year to Date | `sensor.yorkshire_water_year_to_date` | L |
 | Meter Reading | `sensor.yorkshire_water_meter_reading` | m³ |
+| Estimated Cumulative Usage | `sensor.yorkshire_water_estimated_cumulative_usage` | m³ |
 | Continuous Flow Alarm | `sensor.yorkshire_water_continuous_flow_alarm` | diagnostic |
 | Data Latest Update Status | `sensor.yorkshire_water_data_latest_update_status` | diagnostic |
 | Status | `sensor.yorkshire_water_status` | diagnostic |
@@ -35,6 +36,14 @@ The initial Yorkshire Water sensor set is intentionally practical:
 Usage values are normalized to litres. Attributes include source period start/end, latest data date, latest update date, estimated and missing day counts, available cost breakdown fields, raw period data when available, data freshness, and whether the meter reading is estimated.
 
 If the temporary bearer token or required account/meter references are missing, the integration stays in endpoint discovery mode and exposes a status message instead of making live requests.
+
+## Home Assistant Energy Dashboard
+
+Home Assistant's Energy Dashboard water section needs a cumulative water sensor with `device_class: water` and `state_class: total_increasing`. Period sensors such as Yesterday Usage, Week to Date, Month to Date, and Year to Date are useful for daily monitoring, but they reset or change with the reporting period and should not be added to the Energy Dashboard.
+
+Use `sensor.yorkshire_water_estimated_cumulative_usage` for Energy Dashboard water consumption. It reports cubic metres and is estimated from the usage totals available from Yorkshire Water, not from an official physical meter-reading endpoint. If a later API response contains less usage than a previous refresh, the integration preserves the previous cumulative value so the sensor remains monotonic.
+
+To add it, open Settings -> Dashboards -> Energy -> Water consumption, then select Estimated Cumulative Usage.
 
 ## Installation
 

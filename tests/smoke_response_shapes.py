@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime
 import importlib.util
 import json
 from pathlib import Path
+import re
 import sys
 import types
 
@@ -50,8 +51,13 @@ class _Response:
 
 
 class _Session:
-    def __init__(self, usage_fixture: str = "monthly_summary_list_response.json") -> None:
+    def __init__(
+        self,
+        usage_fixture: str = "monthly_summary_list_response.json",
+        daily_fixture: str = "daily_usage_object_response.json",
+    ) -> None:
         self.usage_fixture = usage_fixture
+        self.daily_fixture = daily_fixture
 
     def request(self, method, url, headers=None, params=None, timeout=None):
         if "meter-details" in url:
@@ -62,10 +68,10 @@ class _Session:
             assert params["meterReference"] == "METER-REDACTED"
             assert params["startDate"] == "2026-06-01"
             assert params["endDate"] == "2026-06-17"
-            assert params["moveInDate"] == "2099-06-25"
+            assert params["moveInDate"] in {"2026-06-01", "2099-06-25"}
             assert params["moveOutDate"] == "2026-06-17"
             assert params["timePeriod"] == 1
-            return _Response(_fixture("daily_usage_object_response.json"))
+            return _Response(_fixture(self.daily_fixture))
         return _Response(_fixture(self.usage_fixture))
 
 
@@ -149,8 +155,9 @@ async def _main() -> None:
     )
     assert yearly[0]["clean_water_cost"] == 5.08
 
+    session = _Session()
     client = api.YorkshireWaterAPI(
-        _Session(),
+        session,
         "TOKEN-REDACTED",
         account_reference="ACCOUNT-REDACTED",
     )
@@ -163,6 +170,10 @@ async def _main() -> None:
     assert summary["daily_average_litres"] == 217.0
     assert summary["month_to_date_litres"] == 2438
     assert summary["year_to_date_litres"] is None
+    assert summary["estimated_cumulative_usage_m3"] == 2.438
+    assert summary["estimated_cumulative_total_litres"] == 2438
+    assert summary["estimated_cumulative_source"] == "estimated_from_usage"
+    assert summary["estimated_cumulative_energy_dashboard_compatible"] is True
     assert summary["data_latest_update_status"] is not None
     assert summary["yesterday_included_day_count"] == 1
     assert summary["today_included_day_count"] == 0
@@ -189,6 +200,34 @@ async def _main() -> None:
     yearly_summary = await yearly_client.async_fetch_usage_summary(today=date(2026, 6, 17))
     assert yearly_summary["year_to_date_litres"] == 5432
     assert yearly_summary["year_to_date_included_day_count"] == 2
+    assert yearly_summary["estimated_cumulative_usage_m3"] == 5.432
+
+    session.usage_fixture = "monthly_summary_shrunk_response.json"
+    shrunk_summary = await client.async_fetch_usage_summary(today=date(2026, 6, 17))
+    assert shrunk_summary["estimated_cumulative_usage_m3"] == 2.438
+    assert shrunk_summary["estimated_cumulative_total_litres"] == 2438
+    assert shrunk_summary["estimated_cumulative_source_total_litres"] == 1000
+    assert (
+        shrunk_summary["estimated_cumulative_status_detail"]
+        == "preserved_previous_value_source_total_decreased"
+    )
+
+    sensor_source = (ROOT / "custom_components/yorkshire_water/sensor.py").read_text()
+    cumulative_block = _sensor_block(sensor_source, "estimated_cumulative_usage")
+    assert "state_class=SensorStateClass.TOTAL_INCREASING" in cumulative_block
+    for period_key in (
+        "yesterday_usage",
+        "today_usage",
+        "daily_average",
+        "week_to_date",
+        "previous_week",
+        "month_to_date",
+        "year_to_date",
+    ):
+        assert "SensorStateClass.TOTAL_INCREASING" not in _sensor_block(
+            sensor_source,
+            period_key,
+        )
 
     expired_client = api.YorkshireWaterAPI(
         _Session(),
@@ -211,6 +250,18 @@ async def _main() -> None:
         raise AssertionError("Expected daily parser to reject a list response")
 
     print("response shape smoke ok")
+
+
+def _sensor_block(source: str, key: str) -> str:
+    """Return one sensor description block from sensor.py source text."""
+    match = re.search(
+        rf'YorkshireWaterSensorEntityDescription\(\n\s+key="{key}".*?'
+        r"\n\s+\),",
+        source,
+        re.DOTALL,
+    )
+    assert match is not None, f"Missing sensor block for {key}"
+    return match.group(0)
 
 
 if __name__ == "__main__":

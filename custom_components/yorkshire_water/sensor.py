@@ -192,6 +192,34 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
         },
     ),
     YorkshireWaterSensorEntityDescription(
+        key="estimated_cumulative_usage",
+        translation_key="estimated_cumulative_usage",
+        name="Estimated Cumulative Usage",
+        icon="mdi:water-pump",
+        device_class=SensorDeviceClass.WATER,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
+        value_fn=lambda data: data.get("estimated_cumulative_usage_m3"),
+        attrs_fn=lambda data: {
+            "source": data.get("estimated_cumulative_source"),
+            "raw_unit": data.get("estimated_cumulative_raw_unit"),
+            "unit": data.get("estimated_cumulative_unit"),
+            "total_litres": data.get("estimated_cumulative_total_litres"),
+            "source_total_litres": data.get("estimated_cumulative_source_total_litres"),
+            "earliest_source_date": data.get(
+                "estimated_cumulative_earliest_source_date"
+            ),
+            "latest_source_date": data.get("estimated_cumulative_latest_source_date"),
+            "included_day_count": data.get("estimated_cumulative_included_day_count"),
+            "estimated": data.get("estimated_cumulative_estimated"),
+            "energy_dashboard_compatible": data.get(
+                "estimated_cumulative_energy_dashboard_compatible"
+            ),
+            "status_detail": data.get("estimated_cumulative_status_detail"),
+            "last_successful_update": data.get("last_successful_update"),
+        },
+    ),
+    YorkshireWaterSensorEntityDescription(
         key="continuous_flow_alarm",
         translation_key="continuous_flow_alarm",
         name="Continuous Flow Alarm",

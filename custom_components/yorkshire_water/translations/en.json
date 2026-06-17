@@ -59,6 +59,9 @@
       "meter_reading": {
         "name": "Meter Reading"
       },
+      "estimated_cumulative_usage": {
+        "name": "Estimated Cumulative Usage"
+      },
       "continuous_flow_alarm": {
         "name": "Continuous Flow Alarm"
       },
