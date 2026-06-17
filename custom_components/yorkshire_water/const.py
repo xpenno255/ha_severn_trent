@@ -5,10 +5,14 @@ from __future__ import annotations
 DOMAIN = "yorkshire_water"
 
 CONF_ACCOUNT_ID = "account_id"
+CONF_ACCOUNT_REFERENCE = "account_reference"
 CONF_AUTH_TYPE = "auth_type"
+CONF_BEARER_TOKEN = "bearer_token"
 CONF_METER_ID = "meter_id"
+CONF_METER_REFERENCE = "meter_reference"
 CONF_SESSION_TOKEN = "session_token"
 
+AUTH_TYPE_BEARER_TOKEN = "bearer_token"
 AUTH_TYPE_SESSION_TOKEN = "session_token"
 
 DEFAULT_NAME = "Yorkshire Water"

@@ -34,6 +34,8 @@ _SENSITIVE_KEYS = {
     "authorization",
     "authorization_code",
     "bearer",
+    "bearer_token",
+    "bearertoken",
     "code",
     "code_verifier",
     "codeverifier",
@@ -87,6 +89,10 @@ class YorkshireWaterNoSmartMeterDataError(YorkshireWaterError):
 
 class YorkshireWaterRateLimitError(YorkshireWaterError):
     """Yorkshire Water rate limited the request."""
+
+
+class YorkshireWaterUpstreamUnavailableError(YorkshireWaterError):
+    """Yorkshire Water upstream service is temporarily unavailable."""
 
 
 class YorkshireWaterSchemaError(YorkshireWaterError):
@@ -223,6 +229,18 @@ def parse_current_consumption_response(data: dict[str, Any]) -> dict[str, Any]:
         "meter_reading_m3": round(reading, 3) if reading is not None else None,
         "estimated": current.get("estimated"),
         "reading_date": _first_present(current, "readingDate", "reading_date"),
+        "continuous_flow_alarm": _first_present(
+            current,
+            "continuousFlowAlarm",
+            "continuous_flow_alarm",
+            "continuousFlowStatus",
+            "continuous_flow_status",
+        ),
+        "data_latest_update_status": _first_present(
+            current,
+            "dataLatestUpdateStatus",
+            "latest_update_status",
+        ),
     }
 
 
@@ -336,15 +354,20 @@ class YorkshireWaterAPI:
     def __init__(
         self,
         session: ClientSession,
-        session_token: str,
+        session_token: str | None,
         account_id: str | None = None,
         meter_id: str | None = None,
+        bearer_token: str | None = None,
+        account_reference: str | None = None,
+        meter_reference: str | None = None,
     ) -> None:
         """Initialize the API client."""
         self._session = session
-        self._session_token = session_token.strip()
-        self.account_id = account_id.strip() if account_id else None
-        self.meter_id = meter_id.strip() if meter_id else None
+        self._session_token = (bearer_token or session_token or "").strip()
+        self.account_id = (account_reference or account_id or "").strip() or None
+        self.meter_id = (meter_reference or meter_id or "").strip() or None
+        self.account_reference = self.account_id
+        self.meter_reference = self.meter_id
 
     @staticmethod
     def redact(value: Any) -> Any:
@@ -394,105 +417,181 @@ class YorkshireWaterAPI:
         )
 
     async def async_get_meter_details(self, account_reference: str) -> dict[str, Any]:
-        """Return a discovery placeholder for the meter details endpoint."""
-        _LOGGER.debug(
-            "Yorkshire Water meter details route discovered: %s params=%s",
+        """Fetch meter details for an account reference."""
+        payload = await self._async_request_json(
+            "GET",
             YORKSHIRE_WATER_METER_DETAILS_ENDPOINT_PATH,
-            self.redact({"accountReference": account_reference}),
+            params={"accountReference": account_reference},
         )
-        return _discovery_placeholder(
-            route_name="meter_details",
-            method="GET",
-            endpoint_path=YORKSHIRE_WATER_METER_DETAILS_ENDPOINT_PATH,
-            query_parameters={"accountReference": _REDACTED},
-        )
+        meters = parse_meter_discovery_response(payload)
+        if meters:
+            first_meter = meters[0]
+            self.account_reference = first_meter.get("account_reference") or account_reference
+            self.account_id = self.account_reference
+            self.meter_reference = first_meter.get("meter_reference") or self.meter_reference
+            self.meter_id = self.meter_reference
+        return {"raw": payload, "meters": meters}
 
     async def async_get_current_consumption(self, meter_reference: str) -> dict[str, Any]:
-        """Return a discovery placeholder for the current consumption endpoint."""
-        _LOGGER.debug(
-            "Yorkshire Water current consumption route discovered: %s params=%s",
+        """Fetch current consumption for a meter reference."""
+        payload = await self._async_request_json(
+            "GET",
             YORKSHIRE_WATER_CURRENT_CONSUMPTION_ENDPOINT_PATH,
-            self.redact({"meterReference": meter_reference}),
+            params={"meterReference": meter_reference},
         )
-        return _discovery_placeholder(
-            route_name="current_consumption",
-            method="GET",
-            endpoint_path=YORKSHIRE_WATER_CURRENT_CONSUMPTION_ENDPOINT_PATH,
-            query_parameters={"meterReference": _REDACTED},
-        )
+        return parse_current_consumption_response(payload)
 
     async def async_get_your_usage(self, meter_reference: str) -> dict[str, Any]:
-        """Return a discovery placeholder for the your usage endpoint."""
-        _LOGGER.debug(
-            "Yorkshire Water your usage route discovered: %s params=%s",
+        """Fetch usage history for a meter reference."""
+        return await self._async_request_json(
+            "GET",
             YORKSHIRE_WATER_YOUR_USAGE_ENDPOINT_PATH,
-            self.redact({"meterReference": meter_reference}),
-        )
-        return _discovery_placeholder(
-            route_name="your_usage",
-            method="GET",
-            endpoint_path=YORKSHIRE_WATER_YOUR_USAGE_ENDPOINT_PATH,
-            query_parameters={"meterReference": _REDACTED},
+            params={"meterReference": meter_reference},
         )
 
     async def async_fetch_usage_summary(self) -> dict[str, Any]:
         """Fetch and summarize current Yorkshire Water usage data."""
-        daily_periods = await self.async_fetch_daily_consumption()
-        current_reading = await self.async_fetch_current_consumption()
+        if not self._session_token:
+            raise YorkshireWaterEndpointNotConfiguredError(
+                "Yorkshire Water bearer token is not configured yet"
+            )
+
+        meter_reference = self.meter_reference
+        meter_details: list[dict[str, Any]] = []
+        if not meter_reference and self.account_reference:
+            meter_payload = await self.async_get_meter_details(self.account_reference)
+            meter_details = meter_payload.get("meters", [])
+            if meter_details:
+                meter_reference = meter_details[0].get("meter_reference")
+
+        if not meter_reference:
+            raise YorkshireWaterEndpointNotConfiguredError(
+                "Yorkshire Water meter reference is not configured yet"
+            )
+
+        current_reading = await self.async_get_current_consumption(meter_reference)
+        usage_payload = await self.async_get_your_usage(meter_reference)
+        daily_periods = _extract_usage_periods(usage_payload, "daily")
+        monthly_periods = _extract_usage_periods(usage_payload, "monthly")
+        yearly_periods = _extract_usage_periods(usage_payload, "yearly")
 
         today = date.today()
         yesterday = today - timedelta(days=1)
         week_start = today - timedelta(days=today.weekday())
         previous_week_start = week_start - timedelta(days=7)
         previous_week_end = week_start - timedelta(days=1)
+        month_start = today.replace(day=1)
+        year_start = today.replace(month=1, day=1)
 
-        by_start = {period.start: period for period in daily_periods}
-        recent_periods = sorted(daily_periods, key=lambda item: item.start, reverse=True)
+        by_start = {period["start_date"]: period for period in daily_periods}
+        recent_periods = sorted(
+            daily_periods,
+            key=lambda item: item["start_date"],
+            reverse=True,
+        )
         last_seven = [
-            period for period in daily_periods if today - timedelta(days=7) <= period.start < today
+            period
+            for period in daily_periods
+            if today - timedelta(days=7) <= period["start_date"] < today
         ]
 
         def sum_range(start: date, end: date) -> float | None:
             values = [
-                period.cubic_metres
+                period["value_litres"]
                 for period in daily_periods
-                if start <= period.start <= end
+                if period["value_litres"] is not None
+                and start <= period["start_date"] <= end
             ]
             if not values:
                 return None
-            return round(sum(values), 3)
+            return round(sum(values), 2)
 
         yesterday_period = by_start.get(yesterday)
         today_period = by_start.get(today)
+        latest_period = max(daily_periods, key=lambda item: item["end_date"], default=None)
+        estimated_day_count = sum(1 for period in daily_periods if period.get("estimated"))
+        missing_day_count = _count_missing_days(daily_periods)
+        latest_update = _first_present(
+            usage_payload,
+            "latestUpdateDate",
+            "latest_update_date",
+            "lastUpdated",
+            "last_updated",
+        )
 
         return {
-            "daily_periods": [self._period_as_dict(period) for period in recent_periods],
-            "yesterday_usage_m3": round(yesterday_period.cubic_metres, 3)
+            "daily_periods": [_usage_period_as_dict(period) for period in recent_periods],
+            "monthly_periods": [_usage_period_as_dict(period) for period in monthly_periods],
+            "yearly_periods": [_usage_period_as_dict(period) for period in yearly_periods],
+            "yesterday_usage_litres": yesterday_period.get("value_litres")
             if yesterday_period
             else None,
             "yesterday_start": yesterday.isoformat(),
             "yesterday_end": yesterday.isoformat(),
-            "today_usage_m3": round(today_period.cubic_metres, 3) if today_period else None,
+            "today_usage_litres": today_period.get("value_litres") if today_period else None,
             "today_start": today.isoformat(),
             "today_end": today.isoformat(),
-            "daily_average_m3": round(
-                sum(period.cubic_metres for period in last_seven) / len(last_seven),
-                3,
+            "daily_average_litres": round(
+                sum(period["value_litres"] for period in last_seven if period["value_litres"] is not None)
+                / len([period for period in last_seven if period["value_litres"] is not None]),
+                2,
             )
-            if last_seven
+            if any(period["value_litres"] is not None for period in last_seven)
             else None,
             "daily_average_period_start": (today - timedelta(days=7)).isoformat(),
             "daily_average_period_end": yesterday.isoformat(),
-            "week_to_date_m3": sum_range(week_start, today),
+            "week_to_date_litres": sum_range(week_start, today),
             "week_start": week_start.isoformat(),
-            "previous_week_m3": sum_range(previous_week_start, previous_week_end),
+            "previous_week_litres": sum_range(previous_week_start, previous_week_end),
             "previous_week_start": previous_week_start.isoformat(),
             "previous_week_end": previous_week_end.isoformat(),
+            "month_to_date_litres": _total_from_periods(monthly_periods)
+            or sum_range(month_start, today),
+            "month_start": month_start.isoformat(),
+            "year_to_date_litres": _total_from_periods(yearly_periods)
+            or sum_range(year_start, today),
+            "year_start": year_start.isoformat(),
             "meter_reading_m3": current_reading.get("meter_reading_m3"),
             "meter_reading_estimated": current_reading.get("estimated"),
             "meter_reading_date": current_reading.get("reading_date"),
-            "meter_id": self.meter_id,
-            "account_id": self.account_id,
+            "continuous_flow_alarm": _first_present(
+                current_reading,
+                "continuous_flow_alarm",
+                "continuousFlowAlarm",
+                "continuous_flow",
+            )
+            or _first_present(
+                usage_payload,
+                "continuousFlowAlarm",
+                "continuous_flow_alarm",
+                "continuousFlowStatus",
+                "continuous_flow_status",
+            ),
+            "data_latest_update_status": _first_present(
+                current_reading,
+                "data_latest_update_status",
+                "dataLatestUpdateStatus",
+                "latest_update_status",
+            )
+            or _first_present(
+                usage_payload,
+                "dataLatestUpdateStatus",
+                "latest_update_status",
+                "status",
+            ),
+            "latest_data_date": latest_period["end"] if latest_period else None,
+            "latest_update_date": latest_update,
+            "estimated_day_count": estimated_day_count,
+            "missing_day_count": missing_day_count,
+            "total_cost": _find_first_key(usage_payload, "totalCost", "total_cost"),
+            "clean_water_cost": _find_first_key(
+                usage_payload,
+                "cleanWaterCost",
+                "clean_water_cost",
+            ),
+            "sewerage_cost": _find_first_key(usage_payload, "sewerageCost", "sewerage_cost"),
+            "meter_configured": bool(self.meter_reference),
+            "account_configured": bool(self.account_reference),
             "last_successful_update": datetime.now().isoformat(timespec="seconds"),
             "status": "ok",
         }
@@ -539,11 +638,21 @@ class YorkshireWaterAPI:
         payload = await self._async_request_json("GET", YORKSHIRE_WATER_MONTHLY_CONSUMPTION_PATH)
         return self._normalise_daily_consumption(payload)
 
-    async def _async_request_json(self, method: str, path: str) -> dict[str, Any]:
+    async def _async_request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Make a redacted authenticated request and return JSON."""
         if not YORKSHIRE_WATER_API_BASE_URL:
             raise YorkshireWaterEndpointNotConfiguredError(
                 "Yorkshire Water API base URL is not configured yet"
+            )
+        if not self._session_token:
+            raise YorkshireWaterEndpointNotConfiguredError(
+                "Yorkshire Water bearer token is not configured yet"
             )
 
         url = f"{YORKSHIRE_WATER_API_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
@@ -554,16 +663,15 @@ class YorkshireWaterAPI:
             # unless redacted response testing proves it is required.
             "Authorization": f"Bearer {self._session_token}",
         }
-        params = {
-            "account_id": self.account_id,
-            "meter_id": self.meter_id,
+        request_params = {
+            key: value for key, value in (params or {}).items() if value is not None
         }
 
         _LOGGER.debug(
             "Yorkshire Water API request: %s %s params=%s headers=%s",
             method,
-            url,
-            self.redact(params),
+            path,
+            self.redact(request_params),
             self.redact(headers),
         )
 
@@ -572,7 +680,7 @@ class YorkshireWaterAPI:
                 method,
                 url,
                 headers=headers,
-                params={key: value for key, value in params.items() if value},
+                params=request_params,
                 timeout=30,
             ) as response:
                 await self._raise_for_status(response)
@@ -598,11 +706,12 @@ class YorkshireWaterAPI:
             raise YorkshireWaterMeterNotFoundError("Yorkshire Water account or meter was not found")
         if response.status == 429:
             raise YorkshireWaterRateLimitError("Yorkshire Water rate limit exceeded")
+        if 500 <= response.status <= 599:
+            raise YorkshireWaterUpstreamUnavailableError(
+                f"Yorkshire Water upstream service returned HTTP {response.status}"
+            )
 
-        text = await response.text()
-        raise YorkshireWaterError(
-            f"Yorkshire Water API returned HTTP {response.status}: {text[:120]}"
-        )
+        raise YorkshireWaterError(f"Yorkshire Water API returned HTTP {response.status}")
 
     def _normalise_daily_consumption(self, payload: dict[str, Any]) -> list[UsagePeriod]:
         """Normalize a captured daily consumption payload.
@@ -733,6 +842,189 @@ def _normalise_optional_volume(value: Any, unit: Any) -> float | None:
         value=float(value),
         unit=str(unit),
     ).cubic_metres
+
+
+def _extract_usage_periods(payload: dict[str, Any], grain: str) -> list[dict[str, Any]]:
+    """Extract usage periods from a captured usage payload."""
+    keys_by_grain = {
+        "daily": (
+            "dailyConsumption",
+            "daily_consumption",
+            "dailyUsage",
+            "daily_usage",
+            "days",
+            "dayUsage",
+        ),
+        "monthly": (
+            "monthlyConsumption",
+            "monthly_consumption",
+            "monthlyUsage",
+            "monthly_usage",
+            "months",
+            "monthUsage",
+        ),
+        "yearly": (
+            "yearlyConsumption",
+            "yearly_consumption",
+            "yearlyUsage",
+            "yearly_usage",
+            "years",
+            "yearUsage",
+        ),
+    }
+    raw_items = _find_first_key(payload, *keys_by_grain[grain])
+    if raw_items is None and grain == "daily":
+        try:
+            return [_period_from_normalized_dict(item) for item in parse_daily_consumption_response(payload)]
+        except YorkshireWaterSchemaError:
+            return []
+    if raw_items is None:
+        return []
+    if isinstance(raw_items, dict):
+        raw_items = raw_items.get("items") or raw_items.get("data") or raw_items.get("periods")
+    if not isinstance(raw_items, list):
+        raise YorkshireWaterSchemaError(f"{grain.title()} usage payload did not contain a list")
+
+    periods: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            raise YorkshireWaterSchemaError(f"{grain.title()} usage item was not an object")
+        periods.append(_period_from_payload(item))
+    return periods
+
+
+def _period_from_normalized_dict(item: dict[str, Any]) -> dict[str, Any]:
+    """Convert an existing parser-normalized period to the summary shape."""
+    start_value = item.get("start")
+    end_value = item.get("end") or start_value
+    value_m3 = item.get("value_m3")
+    return {
+        "start": start_value,
+        "end": end_value,
+        "start_date": _parse_date(start_value),
+        "end_date": _parse_date(end_value),
+        "value_litres": round(float(value_m3) * 1000, 2)
+        if value_m3 is not None
+        else None,
+        "estimated": item.get("estimated"),
+        "source": item.get("source"),
+        "freshness": item.get("freshness"),
+        "total_cost": item.get("total_cost"),
+        "clean_water_cost": item.get("clean_water_cost"),
+        "sewerage_cost": item.get("sewerage_cost"),
+    }
+
+
+def _period_from_payload(item: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a raw usage period to litres."""
+    start_value = _first_present(
+        item,
+        "startDate",
+        "start_date",
+        "fromDate",
+        "from_date",
+        "date",
+        "periodStart",
+    )
+    end_value = (
+        _first_present(
+            item,
+            "endDate",
+            "end_date",
+            "toDate",
+            "to_date",
+            "periodEnd",
+        )
+        or start_value
+    )
+    value = _first_present(
+        item,
+        "litres",
+        "liters",
+        "usageLitres",
+        "usage_litres",
+        "value",
+        "usage",
+        "consumption",
+    )
+    unit = _first_present(item, "unit", "uom", "unitOfMeasure") or (
+        "litres" if _first_present(item, "litres", "liters", "usageLitres", "usage_litres") is not None else "m3"
+    )
+    value_litres = _normalise_optional_litres(value, unit)
+    return {
+        "start": _parse_date(start_value).isoformat() if start_value else None,
+        "end": _parse_date(end_value).isoformat() if end_value else None,
+        "start_date": _parse_date(start_value) if start_value else date.min,
+        "end_date": _parse_date(end_value) if end_value else date.min,
+        "value_litres": round(value_litres, 2) if value_litres is not None else None,
+        "estimated": _first_present(item, "estimated", "isEstimated", "is_estimated"),
+        "source": item.get("source"),
+        "freshness": item.get("freshness") or item.get("lastUpdated"),
+        "total_cost": _first_present(item, "totalCost", "total_cost"),
+        "clean_water_cost": _first_present(item, "cleanWaterCost", "clean_water_cost"),
+        "sewerage_cost": _first_present(item, "sewerageCost", "sewerage_cost"),
+    }
+
+
+def _normalise_optional_litres(value: Any, unit: Any) -> float | None:
+    """Normalize an optional volume value to litres."""
+    if value is None:
+        return None
+    normalised = str(unit).lower().replace("³", "3").replace(" ", "")
+    numeric = float(value)
+    if normalised in {"l", "litre", "litres", "liter", "liters"}:
+        return numeric
+    if normalised in {"m3", "cubicmetres", "cubicmeters"}:
+        return numeric * 1000
+    raise YorkshireWaterSchemaError(f"Unsupported water unit: {unit}")
+
+
+def _total_from_periods(periods: list[dict[str, Any]]) -> float | None:
+    """Total litre values from normalized periods."""
+    values = [period["value_litres"] for period in periods if period["value_litres"] is not None]
+    return round(sum(values), 2) if values else None
+
+
+def _count_missing_days(periods: list[dict[str, Any]]) -> int:
+    """Count missing days between the first and latest daily usage period."""
+    dated = sorted({period["start_date"] for period in periods if period["start_date"] != date.min})
+    if len(dated) < 2:
+        return 0
+    expected_days = (dated[-1] - dated[0]).days + 1
+    return max(expected_days - len(dated), 0)
+
+
+def _usage_period_as_dict(period: dict[str, Any]) -> dict[str, Any]:
+    """Serialize a normalized usage period for sensor attributes."""
+    return {
+        "start": period.get("start"),
+        "end": period.get("end"),
+        "value_litres": period.get("value_litres"),
+        "estimated": period.get("estimated"),
+        "source": period.get("source"),
+        "freshness": period.get("freshness"),
+        "total_cost": period.get("total_cost"),
+        "clean_water_cost": period.get("clean_water_cost"),
+        "sewerage_cost": period.get("sewerage_cost"),
+    }
+
+
+def _find_first_key(data: Any, *keys: str) -> Any:
+    """Return the first matching key found in a nested JSON-like structure."""
+    if isinstance(data, dict):
+        for key in keys:
+            if key in data:
+                return data[key]
+        for value in data.values():
+            found = _find_first_key(value, *keys)
+            if found is not None:
+                return found
+    if isinstance(data, list):
+        for item in data:
+            found = _find_first_key(item, *keys)
+            if found is not None:
+                return found
+    return None
 
 
 def _discovery_placeholder(

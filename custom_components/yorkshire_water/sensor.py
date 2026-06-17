@@ -19,7 +19,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 
-from .const import CONF_ACCOUNT_ID, CONF_METER_ID, DEFAULT_NAME, DOMAIN
+from .const import DEFAULT_NAME, DOMAIN
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -40,8 +40,15 @@ def _period_attrs(
     attrs: dict[str, Any] = {
         "source_period_start": data.get(start_key),
         "source_period_end": data.get(end_key),
-        "unit": UnitOfVolume.CUBIC_METERS,
+        "unit": UnitOfVolume.LITERS,
         "last_successful_update": data.get("last_successful_update"),
+        "latest_data_date": data.get("latest_data_date"),
+        "latest_update_date": data.get("latest_update_date"),
+        "estimated_day_count": data.get("estimated_day_count"),
+        "missing_day_count": data.get("missing_day_count"),
+        "total_cost": data.get("total_cost"),
+        "clean_water_cost": data.get("clean_water_cost"),
+        "sewerage_cost": data.get("sewerage_cost"),
     }
     if raw_period_key:
         attrs["source_periods"] = data.get(raw_period_key) or []
@@ -56,8 +63,8 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
         icon="mdi:water",
         device_class=SensorDeviceClass.WATER,
         state_class=SensorStateClass.TOTAL,
-        native_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
-        value_fn=lambda data: data.get("yesterday_usage_m3"),
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        value_fn=lambda data: data.get("yesterday_usage_litres"),
         attrs_fn=lambda data: _period_attrs(data, "yesterday_start", "yesterday_end"),
     ),
     YorkshireWaterSensorEntityDescription(
@@ -67,8 +74,8 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
         icon="mdi:water-outline",
         device_class=SensorDeviceClass.WATER,
         state_class=SensorStateClass.TOTAL,
-        native_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
-        value_fn=lambda data: data.get("today_usage_m3"),
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        value_fn=lambda data: data.get("today_usage_litres"),
         attrs_fn=lambda data: _period_attrs(data, "today_start", "today_end"),
     ),
     YorkshireWaterSensorEntityDescription(
@@ -77,8 +84,8 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
         name="7-Day Average",
         icon="mdi:water-percent",
         device_class=SensorDeviceClass.WATER,
-        native_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
-        value_fn=lambda data: data.get("daily_average_m3"),
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        value_fn=lambda data: data.get("daily_average_litres"),
         attrs_fn=lambda data: _period_attrs(
             data,
             "daily_average_period_start",
@@ -93,13 +100,20 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
         icon="mdi:water-sync",
         device_class=SensorDeviceClass.WATER,
         state_class=SensorStateClass.TOTAL,
-        native_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
-        value_fn=lambda data: data.get("week_to_date_m3"),
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        value_fn=lambda data: data.get("week_to_date_litres"),
         attrs_fn=lambda data: {
             "source_period_start": data.get("week_start"),
             "source_period_end": datetime.now().date().isoformat(),
-            "unit": UnitOfVolume.CUBIC_METERS,
+            "unit": UnitOfVolume.LITERS,
             "last_successful_update": data.get("last_successful_update"),
+            "latest_data_date": data.get("latest_data_date"),
+            "latest_update_date": data.get("latest_update_date"),
+            "estimated_day_count": data.get("estimated_day_count"),
+            "missing_day_count": data.get("missing_day_count"),
+            "total_cost": data.get("total_cost"),
+            "clean_water_cost": data.get("clean_water_cost"),
+            "sewerage_cost": data.get("sewerage_cost"),
         },
     ),
     YorkshireWaterSensorEntityDescription(
@@ -109,12 +123,44 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
         icon="mdi:water-check",
         device_class=SensorDeviceClass.WATER,
         state_class=SensorStateClass.TOTAL,
-        native_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
-        value_fn=lambda data: data.get("previous_week_m3"),
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        value_fn=lambda data: data.get("previous_week_litres"),
         attrs_fn=lambda data: _period_attrs(
             data,
             "previous_week_start",
             "previous_week_end",
+        ),
+    ),
+    YorkshireWaterSensorEntityDescription(
+        key="month_to_date",
+        translation_key="month_to_date",
+        name="Month to Date",
+        icon="mdi:water-plus",
+        device_class=SensorDeviceClass.WATER,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        value_fn=lambda data: data.get("month_to_date_litres"),
+        attrs_fn=lambda data: _period_attrs(
+            data,
+            "month_start",
+            "latest_data_date",
+            "monthly_periods",
+        ),
+    ),
+    YorkshireWaterSensorEntityDescription(
+        key="year_to_date",
+        translation_key="year_to_date",
+        name="Year to Date",
+        icon="mdi:water-plus-outline",
+        device_class=SensorDeviceClass.WATER,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        value_fn=lambda data: data.get("year_to_date_litres"),
+        attrs_fn=lambda data: _period_attrs(
+            data,
+            "year_start",
+            "latest_data_date",
+            "yearly_periods",
         ),
     ),
     YorkshireWaterSensorEntityDescription(
@@ -134,6 +180,34 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
         },
     ),
     YorkshireWaterSensorEntityDescription(
+        key="continuous_flow_alarm",
+        translation_key="continuous_flow_alarm",
+        name="Continuous Flow Alarm",
+        icon="mdi:water-alert",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: data.get("continuous_flow_alarm"),
+        attrs_fn=lambda data: {
+            "latest_data_date": data.get("latest_data_date"),
+            "latest_update_date": data.get("latest_update_date"),
+            "last_successful_update": data.get("last_successful_update"),
+        },
+    ),
+    YorkshireWaterSensorEntityDescription(
+        key="data_latest_update_status",
+        translation_key="data_latest_update_status",
+        name="Data Latest Update Status",
+        icon="mdi:database-clock",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: data.get("data_latest_update_status"),
+        attrs_fn=lambda data: {
+            "latest_data_date": data.get("latest_data_date"),
+            "latest_update_date": data.get("latest_update_date"),
+            "estimated_day_count": data.get("estimated_day_count"),
+            "missing_day_count": data.get("missing_day_count"),
+            "last_successful_update": data.get("last_successful_update"),
+        },
+    ),
+    YorkshireWaterSensorEntityDescription(
         key="status",
         translation_key="status",
         name="Status",
@@ -143,8 +217,10 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
         attrs_fn=lambda data: {
             "status_detail": data.get("status_detail"),
             "last_successful_update": data.get("last_successful_update"),
-            "account_configured": bool(data.get("account_id")),
-            "meter_configured": bool(data.get("meter_id")),
+            "account_configured": bool(data.get("account_configured")),
+            "meter_configured": bool(data.get("meter_configured")),
+            "latest_data_date": data.get("latest_data_date"),
+            "latest_update_date": data.get("latest_update_date"),
         },
     ),
 )
@@ -157,14 +233,9 @@ async def async_setup_entry(
 ) -> None:
     """Set up Yorkshire Water sensors from a config entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    account_or_meter = (
-        entry.data.get(CONF_METER_ID)
-        or entry.data.get(CONF_ACCOUNT_ID)
-        or entry.entry_id
-    )
 
     async_add_entities(
-        YorkshireWaterSensor(coordinator, entry, account_or_meter, description)
+        YorkshireWaterSensor(coordinator, entry, description)
         for description in SENSORS
     )
 
@@ -179,19 +250,17 @@ class YorkshireWaterSensor(CoordinatorEntity[DataUpdateCoordinator], SensorEntit
         self,
         coordinator: DataUpdateCoordinator,
         entry: ConfigEntry,
-        account_or_meter: str,
         description: YorkshireWaterSensorEntityDescription,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self.entity_description = description
-        self._attr_unique_id = f"{DOMAIN}_{account_or_meter}_{description.key}"
+        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=DEFAULT_NAME,
             manufacturer="Yorkshire Water",
             model="Water Account",
-            serial_number=entry.data.get(CONF_METER_ID),
         )
 
     @property

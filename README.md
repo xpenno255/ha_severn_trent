@@ -10,7 +10,7 @@ This integration is being adapted for Yorkshire Water's customer portal. The Hom
 - Component folder: `custom_components/yorkshire_water`
 - Integration name: Yorkshire Water
 - Repository: `https://github.com/Crash-Evans/ha_yorkshire_water`
-- API status: development scaffold only; live Yorkshire Water portal endpoints still need to be captured and implemented
+- API status: beta manual bearer token mode for captured smart meter endpoints; full OAuth PKCE login is not implemented yet
 
 This is a new Home Assistant integration/domain. Add Yorkshire Water as a fresh integration.
 
@@ -20,17 +20,21 @@ The initial Yorkshire Water sensor set is intentionally practical:
 
 | Sensor | Entity ID pattern | Unit |
 | --- | --- | --- |
-| Yesterday Usage | `sensor.yorkshire_water_yesterday_usage` | m³ |
-| Today Usage | `sensor.yorkshire_water_today_usage` | m³ |
-| 7-Day Average | `sensor.yorkshire_water_7_day_average` | m³ |
-| Week to Date | `sensor.yorkshire_water_week_to_date` | m³ |
-| Previous Week | `sensor.yorkshire_water_previous_week` | m³ |
+| Yesterday Usage | `sensor.yorkshire_water_yesterday_usage` | L |
+| Today Usage | `sensor.yorkshire_water_today_usage` | L |
+| 7-Day Average | `sensor.yorkshire_water_7_day_average` | L |
+| Week to Date | `sensor.yorkshire_water_week_to_date` | L |
+| Previous Week | `sensor.yorkshire_water_previous_week` | L |
+| Month to Date | `sensor.yorkshire_water_month_to_date` | L |
+| Year to Date | `sensor.yorkshire_water_year_to_date` | L |
 | Meter Reading | `sensor.yorkshire_water_meter_reading` | m³ |
+| Continuous Flow Alarm | `sensor.yorkshire_water_continuous_flow_alarm` | diagnostic |
+| Data Latest Update Status | `sensor.yorkshire_water_data_latest_update_status` | diagnostic |
 | Status | `sensor.yorkshire_water_status` | diagnostic |
 
-Usage values are normalized to cubic metres. Attributes include source period start/end, raw period data when available, data freshness, and whether the meter reading is estimated.
+Usage values are normalized to litres. Attributes include source period start/end, latest data date, latest update date, estimated and missing day counts, available cost breakdown fields, raw period data when available, data freshness, and whether the meter reading is estimated.
 
-Until the live Yorkshire Water API contract is implemented, these sensors may be unavailable with a coordinator warning that the daily consumption endpoint is not configured.
+If the temporary bearer token or required account/meter references are missing, the integration stays in endpoint discovery mode and exposes a status message instead of making live requests.
 
 ## Installation
 
@@ -65,26 +69,27 @@ Restart Home Assistant, then add Yorkshire Water from Settings -> Devices & Serv
 
 ## Configuration
 
-The current config flow is a temporary development flow. It accepts:
+The current config flow is a temporary beta development flow. It accepts:
 
-- Portal session or access token
-- Optional account ID or customer reference
-- Optional meter ID or serial number
+- Temporary bearer token from a current Yorkshire Water portal session
+- Optional account reference
+- Optional meter reference
 
-The integration stores only the values needed by the config entry. Do not paste tokens into GitHub issues, screenshots, or logs.
+This is not a full OAuth login. Bearer tokens expire quickly and must be refreshed manually until OAuth PKCE login and refresh handling are implemented.
+
+If you provide an account reference but not a meter reference, the integration tries to discover the meter reference from the smart meter meter-details endpoint. If you provide neither reference, the integration remains in endpoint discovery mode.
+
+The integration stores the temporary token only in the Home Assistant config entry for now and redacts it in integration logs. Do not paste bearer tokens, account references, meter references, cookies, screenshots, or raw portal captures into GitHub issues or logs.
 
 ## API Discovery Notes
 
-Yorkshire Water support needs a live portal capture to confirm:
+Yorkshire Water beta support currently uses these captured smart meter endpoints with bearer-token auth:
 
-- Authentication method: OAuth, bearer token, session cookie, CSRF flow, or another mechanism
-- Account discovery endpoint
-- Meter discovery endpoint
-- Current meter reading or current consumption endpoint
-- Daily consumption endpoint
-- Monthly or period consumption endpoint, if available
+- `GET /api/account/smartmeter/meter-details?accountReference=...`
+- `GET /api/account/smartmeter/current-consumption?meterReference=...`
+- `GET /api/account/smartmeter/your-usage?meterReference=...`
 
-The API client already has async request helpers, structured errors, safe redacted debug logging, and normalizers ready to adapt once the endpoint schema is known.
+The API client has async request helpers, structured errors, safe redacted debug logging, and parser scaffolding for captured response schemas.
 
 Sensitive values redacted from debug logs include authorization headers, cookies, tokens, customer references, account IDs, and meter IDs.
 

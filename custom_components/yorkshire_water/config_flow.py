@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Any
 
@@ -11,10 +12,14 @@ from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
+    AUTH_TYPE_BEARER_TOKEN,
     AUTH_TYPE_SESSION_TOKEN,
     CONF_ACCOUNT_ID,
+    CONF_ACCOUNT_REFERENCE,
     CONF_AUTH_TYPE,
+    CONF_BEARER_TOKEN,
     CONF_METER_ID,
+    CONF_METER_REFERENCE,
     CONF_SESSION_TOKEN,
     DEFAULT_NAME,
     DOMAIN,
@@ -39,35 +44,50 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            session_token = user_input[CONF_SESSION_TOKEN].strip()
-            account_id = user_input.get(CONF_ACCOUNT_ID, "").strip() or None
-            meter_id = user_input.get(CONF_METER_ID, "").strip() or None
+            bearer_token = user_input.get(CONF_BEARER_TOKEN, "").strip() or None
+            legacy_token = user_input.get(CONF_SESSION_TOKEN, "").strip() or None
+            account_reference = (
+                user_input.get(CONF_ACCOUNT_REFERENCE, "").strip()
+                or user_input.get(CONF_ACCOUNT_ID, "").strip()
+                or None
+            )
+            meter_reference = (
+                user_input.get(CONF_METER_REFERENCE, "").strip()
+                or user_input.get(CONF_METER_ID, "").strip()
+                or None
+            )
 
-            if not session_token:
-                errors["base"] = "invalid_auth"
-            else:
-                unique_id = meter_id or account_id or DEFAULT_NAME.lower().replace(" ", "_")
-                await self.async_set_unique_id(unique_id)
-                self._abort_if_unique_id_configured()
+            unique_source = meter_reference or account_reference
+            unique_id = (
+                "yw_" + hashlib.sha256(unique_source.encode()).hexdigest()[:12]
+                if unique_source
+                else DEFAULT_NAME.lower().replace(" ", "_")
+            )
+            await self.async_set_unique_id(unique_id)
+            self._abort_if_unique_id_configured()
 
-                title_detail = account_id or meter_id
-                return self.async_create_entry(
-                    title=f"{DEFAULT_NAME} ({title_detail})" if title_detail else DEFAULT_NAME,
-                    data={
-                        CONF_AUTH_TYPE: AUTH_TYPE_SESSION_TOKEN,
-                        CONF_SESSION_TOKEN: session_token,
-                        CONF_ACCOUNT_ID: account_id,
-                        CONF_METER_ID: meter_id,
-                    },
-                )
+            return self.async_create_entry(
+                title=DEFAULT_NAME,
+                data={
+                    CONF_AUTH_TYPE: AUTH_TYPE_BEARER_TOKEN
+                    if bearer_token
+                    else AUTH_TYPE_SESSION_TOKEN,
+                    CONF_BEARER_TOKEN: bearer_token or legacy_token,
+                    CONF_SESSION_TOKEN: legacy_token,
+                    CONF_ACCOUNT_REFERENCE: account_reference,
+                    CONF_METER_REFERENCE: meter_reference,
+                    CONF_ACCOUNT_ID: account_reference,
+                    CONF_METER_ID: meter_reference,
+                },
+            )
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_SESSION_TOKEN): str,
-                    vol.Optional(CONF_ACCOUNT_ID): str,
-                    vol.Optional(CONF_METER_ID): str,
+                    vol.Optional(CONF_BEARER_TOKEN): str,
+                    vol.Optional(CONF_ACCOUNT_REFERENCE): str,
+                    vol.Optional(CONF_METER_REFERENCE): str,
                 }
             ),
             errors=errors,
@@ -87,8 +107,8 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            session_token = user_input[CONF_SESSION_TOKEN].strip()
-            if not session_token:
+            bearer_token = user_input.get(CONF_BEARER_TOKEN, "").strip()
+            if not bearer_token:
                 errors["base"] = "invalid_auth"
             elif self._reauth_entry is None:
                 _LOGGER.error("Reauthentication requested without a config entry")
@@ -98,7 +118,8 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._reauth_entry,
                     data={
                         **self._reauth_entry.data,
-                        CONF_SESSION_TOKEN: session_token,
+                        CONF_AUTH_TYPE: AUTH_TYPE_BEARER_TOKEN,
+                        CONF_BEARER_TOKEN: bearer_token,
                     },
                 )
                 await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
@@ -106,6 +127,6 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=vol.Schema({vol.Required(CONF_SESSION_TOKEN): str}),
+            data_schema=vol.Schema({vol.Required(CONF_BEARER_TOKEN): str}),
             errors=errors,
         )

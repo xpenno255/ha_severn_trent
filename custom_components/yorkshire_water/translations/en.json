@@ -3,18 +3,18 @@
     "step": {
       "user": {
         "title": "Yorkshire Water",
-        "description": "Temporary development setup: paste a current Yorkshire Water portal session token or access token. Optional account and meter IDs can be supplied if known. Endpoint support is still being discovered, so sensors may remain unavailable until the API layer is completed.",
+        "description": "Beta development setup: paste a temporary Yorkshire Water bearer token from a current portal session. Optional account and meter references can be supplied if known. If the token or required references are missing, the integration remains in endpoint discovery mode.",
         "data": {
-          "session_token": "Portal session or access token",
-          "account_id": "Account ID or customer reference",
-          "meter_id": "Meter ID or serial number"
+          "bearer_token": "Temporary bearer token",
+          "account_reference": "Account reference",
+          "meter_reference": "Meter reference"
         }
       },
       "reauth_confirm": {
         "title": "Reauthenticate Yorkshire Water",
-        "description": "Paste a fresh Yorkshire Water portal session token or access token.",
+        "description": "Paste a fresh temporary Yorkshire Water bearer token.",
         "data": {
-          "session_token": "Portal session or access token"
+          "bearer_token": "Temporary bearer token"
         }
       }
     },
@@ -45,8 +45,20 @@
       "previous_week": {
         "name": "Previous Week"
       },
+      "month_to_date": {
+        "name": "Month to Date"
+      },
+      "year_to_date": {
+        "name": "Year to Date"
+      },
       "meter_reading": {
         "name": "Meter Reading"
+      },
+      "continuous_flow_alarm": {
+        "name": "Continuous Flow Alarm"
+      },
+      "data_latest_update_status": {
+        "name": "Data Latest Update Status"
       },
       "status": {
         "name": "Status"

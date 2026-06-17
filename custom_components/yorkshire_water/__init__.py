@@ -21,7 +21,10 @@ from .api import (
 )
 from .const import (
     CONF_ACCOUNT_ID,
+    CONF_ACCOUNT_REFERENCE,
+    CONF_BEARER_TOKEN,
     CONF_METER_ID,
+    CONF_METER_REFERENCE,
     CONF_SESSION_TOKEN,
     DEFAULT_SCAN_INTERVAL_HOURS,
     DOMAIN,
@@ -37,15 +40,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.info("Setting up Yorkshire Water integration")
     _LOGGER.debug("Config entry data: %s", YorkshireWaterAPI.redact(dict(entry.data)))
 
-    session_token = entry.data.get(CONF_SESSION_TOKEN)
-    if not session_token:
-        raise ConfigEntryAuthFailed("Missing Yorkshire Water session token")
+    bearer_token = entry.data.get(CONF_BEARER_TOKEN) or entry.data.get(CONF_SESSION_TOKEN)
 
     api = YorkshireWaterAPI(
         async_get_clientsession(hass),
-        session_token=session_token,
+        session_token=bearer_token,
         account_id=entry.data.get(CONF_ACCOUNT_ID),
         meter_id=entry.data.get(CONF_METER_ID),
+        bearer_token=bearer_token,
+        account_reference=entry.data.get(CONF_ACCOUNT_REFERENCE),
+        meter_reference=entry.data.get(CONF_METER_REFERENCE),
     )
 
     async def async_update_data() -> dict:
@@ -59,8 +63,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return {
                 "status": "api_discovery_required",
                 "status_detail": str(err),
-                "account_id": api.account_id,
-                "meter_id": api.meter_id,
+                "account_configured": bool(api.account_reference),
+                "meter_configured": bool(api.meter_reference),
             }
         except YorkshireWaterError as err:
             raise UpdateFailed(f"Error communicating with Yorkshire Water: {err}") from err
