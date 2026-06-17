@@ -75,6 +75,162 @@ class YorkshireWaterEndpointNotConfiguredError(YorkshireWaterError):
     """Yorkshire Water endpoint details have not been captured yet."""
 
 
+def parse_account_discovery_response(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parse a redacted account discovery response into a normalized shape."""
+    _ensure_dict(data, "Account discovery payload")
+
+    # TODO: Replace these scaffold mappings once captured Yorkshire Water
+    # schemas confirm the real account and property fields.
+    accounts = data.get("accounts")
+    if accounts is None:
+        return []
+    if not isinstance(accounts, list):
+        raise YorkshireWaterSchemaError("Account discovery payload accounts was not a list")
+
+    normalized: list[dict[str, Any]] = []
+    customer = data.get("customer") or {}
+    if not isinstance(customer, dict):
+        raise YorkshireWaterSchemaError("Account discovery customer section was not an object")
+    customer_id = _first_present(customer, "customerId", "customer_id")
+    for item in accounts:
+        if not isinstance(item, dict):
+            raise YorkshireWaterSchemaError("Account discovery item was not an object")
+        normalized.append(
+            {
+                "account_id": _first_present(item, "accountId", "account_id"),
+                "customer_id": customer_id,
+                "property_id": _first_present(item, "propertyId", "property_id"),
+            }
+        )
+    return normalized
+
+
+def parse_meter_discovery_response(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parse a redacted meter discovery response into a normalized shape."""
+    _ensure_dict(data, "Meter discovery payload")
+
+    # TODO: Replace these scaffold mappings once captured Yorkshire Water
+    # schemas confirm the real meter discovery fields.
+    meters = data.get("meters")
+    if meters is None:
+        return []
+    if not isinstance(meters, list):
+        raise YorkshireWaterSchemaError("Meter discovery payload meters was not a list")
+
+    normalized: list[dict[str, Any]] = []
+    for item in meters:
+        if not isinstance(item, dict):
+            raise YorkshireWaterSchemaError("Meter discovery item was not an object")
+        normalized.append(
+            {
+                "meter_id": _first_present(item, "meterId", "meter_id"),
+                "meter_type": _first_present(item, "meterType", "meter_type"),
+                "status": item.get("status"),
+                "unit": _first_present(item, "unit", "uom", "unitOfMeasure"),
+            }
+        )
+    return normalized
+
+
+def parse_current_consumption_response(data: dict[str, Any]) -> dict[str, Any]:
+    """Parse a redacted current consumption response into a normalized shape."""
+    _ensure_dict(data, "Current consumption payload")
+
+    # TODO: Replace these scaffold mappings once captured Yorkshire Water
+    # schemas confirm whether this endpoint is a reading, consumption total, or
+    # another portal-specific summary.
+    current = data.get("currentConsumption") or data.get("current") or {}
+    if not isinstance(current, dict):
+        raise YorkshireWaterSchemaError("Current consumption payload section was not an object")
+
+    value = _first_present(current, "meterReading", "meter_reading", "reading")
+    unit = _first_present(current, "unit", "uom", "unitOfMeasure") or "m3"
+    reading = _normalise_optional_volume(value, unit)
+
+    return {
+        "meter_reading_m3": round(reading, 3) if reading is not None else None,
+        "estimated": current.get("estimated"),
+        "reading_date": _first_present(current, "readingDate", "reading_date"),
+    }
+
+
+def parse_daily_consumption_response(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parse a redacted daily consumption response into normalized periods."""
+    _ensure_dict(data, "Daily consumption payload")
+
+    # TODO: Replace these scaffold mappings once captured Yorkshire Water
+    # schemas confirm daily usage field names, units, and completion markers.
+    raw_items = (
+        data.get("dailyConsumption")
+        or data.get("daily_consumption")
+        or data.get("items")
+        or data.get("data")
+    )
+    if raw_items is None:
+        return []
+    if not isinstance(raw_items, list):
+        raise YorkshireWaterSchemaError("Daily consumption payload did not contain a list")
+
+    normalized: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            raise YorkshireWaterSchemaError("Daily consumption item was not an object")
+        start_value = _first_present(item, "startDate", "start_date", "date")
+        end_value = _first_present(item, "endDate", "end_date") or start_value
+        value = _first_present(item, "value", "usage", "consumption")
+        unit = _first_present(item, "unit", "uom", "unitOfMeasure") or "m3"
+        volume = _normalise_optional_volume(value, unit)
+        normalized.append(
+            {
+                "start": _parse_date(start_value).isoformat() if start_value else None,
+                "end": _parse_date(end_value).isoformat() if end_value else None,
+                "value_m3": round(volume, 3) if volume is not None else None,
+                "source": item.get("source"),
+                "freshness": item.get("freshness") or item.get("lastUpdated"),
+            }
+        )
+    return normalized
+
+
+def parse_meter_reading_response(data: dict[str, Any]) -> dict[str, Any]:
+    """Parse a redacted meter reading response into a normalized shape."""
+    _ensure_dict(data, "Meter reading payload")
+
+    # TODO: Replace these scaffold mappings once captured Yorkshire Water
+    # schemas confirm the real meter reading endpoint and units.
+    reading_data = data.get("meterReading") or data.get("reading") or {}
+    if not isinstance(reading_data, dict):
+        raise YorkshireWaterSchemaError("Meter reading payload section was not an object")
+
+    value = _first_present(reading_data, "reading", "meterReading", "meter_reading")
+    unit = _first_present(reading_data, "unit", "uom", "unitOfMeasure") or "m3"
+    reading = _normalise_optional_volume(value, unit)
+
+    return {
+        "meter_reading_m3": round(reading, 3) if reading is not None else None,
+        "estimated": reading_data.get("estimated"),
+        "reading_date": _first_present(reading_data, "readingDate", "reading_date"),
+        "source": reading_data.get("source"),
+    }
+
+
+def parse_api_error_response(data: dict[str, Any]) -> dict[str, Any]:
+    """Parse a redacted API error response into a structured discovery error."""
+    _ensure_dict(data, "API error payload")
+
+    # TODO: Replace these scaffold mappings once captured Yorkshire Water error
+    # payloads confirm the real error envelope.
+    error = data.get("error") or data
+    if not isinstance(error, dict):
+        raise YorkshireWaterSchemaError("API error payload section was not an object")
+
+    return {
+        "code": _first_present(error, "code", "errorCode", "error_code"),
+        "message": _first_present(error, "message", "detail", "title"),
+        "status": data.get("status"),
+    }
+
+
 @dataclass(slots=True)
 class UsagePeriod:
     """Water usage for a period."""
@@ -395,6 +551,24 @@ def _parse_date(value: Any) -> date:
         raise YorkshireWaterSchemaError(f"Unsupported date value: {value!r}")
 
     return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+
+
+def _ensure_dict(data: Any, label: str) -> None:
+    """Validate that a parser received a JSON object."""
+    if not isinstance(data, dict):
+        raise YorkshireWaterSchemaError(f"{label} was not a JSON object")
+
+
+def _normalise_optional_volume(value: Any, unit: Any) -> float | None:
+    """Normalize an optional volume value to cubic metres."""
+    if value is None:
+        return None
+    return UsagePeriod(
+        start=date.today(),
+        end=date.today(),
+        value=float(value),
+        unit=str(unit),
+    ).cubic_metres
 
 
 def _first_present(data: dict[str, Any], *keys: str) -> Any:

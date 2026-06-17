@@ -2,7 +2,7 @@
 
 A custom Home Assistant integration for Yorkshire Water smart meter usage.
 
-This fork is being adapted from the upstream Severn Trent Water integration, but Yorkshire Water does not appear to use the same Kraken GraphQL API flow. The Home Assistant integration identity and architecture have been renamed, and the provider-specific API layer is now isolated for Yorkshire Water endpoint discovery.
+This integration is being adapted for Yorkshire Water's customer portal. The Home Assistant integration identity and architecture are in place, and the provider-specific API layer is isolated for Yorkshire Water endpoint discovery.
 
 ## Current Status
 
@@ -12,7 +12,7 @@ This fork is being adapted from the upstream Severn Trent Water integration, but
 - Repository: `https://github.com/Crash-Evans/ha_yorkshire_water`
 - API status: development scaffold only; live Yorkshire Water portal endpoints still need to be captured and implemented
 
-This is a new Home Assistant integration/domain. Existing Severn Trent entries are not migrated automatically; add Yorkshire Water as a fresh integration.
+This is a new Home Assistant integration/domain. Add Yorkshire Water as a fresh integration.
 
 ## Sensors
 
@@ -75,7 +75,7 @@ The integration stores only the values needed by the config entry. Do not paste 
 
 ## API Discovery Notes
 
-The old Severn Trent Kraken GraphQL queries have been removed from the active integration. Yorkshire Water support needs a live portal capture to confirm:
+Yorkshire Water support needs a live portal capture to confirm:
 
 - Authentication method: OAuth, bearer token, session cookie, CSRF flow, or another mechanism
 - Account discovery endpoint
@@ -87,6 +87,8 @@ The old Severn Trent Kraken GraphQL queries have been removed from the active in
 The API client already has async request helpers, structured errors, safe redacted debug logging, and normalizers ready to adapt once the endpoint schema is known.
 
 Sensitive values redacted from debug logs include authorization headers, cookies, tokens, customer references, account IDs, and meter IDs.
+
+See [docs/api_discovery.md](docs/api_discovery.md) and [docs/redaction_checklist.md](docs/redaction_checklist.md) before sharing any captured request or response structure.
 
 ## Debug Logging
 
@@ -109,6 +111,6 @@ python -m compileall custom_components/yorkshire_water
 
 If your development environment has Home Assistant tooling installed, also run manifest validation and any configured linter or test suite.
 
-## Upstream Attribution
+## History
 
-This fork originated from `xpenno255/ha_severn_trent`. Historical changelog entries and license attribution are retained where appropriate, but user-facing integration branding is now Yorkshire Water.
+Historical changelog entries and license attribution are retained where appropriate, but user-facing integration branding is now Yorkshire Water.

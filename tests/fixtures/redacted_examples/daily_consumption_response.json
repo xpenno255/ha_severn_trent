@@ -1,0 +1,20 @@
+{
+  "accountId": "ACCOUNT-REDACTED",
+  "meterId": "METER-REDACTED",
+  "dailyConsumption": [
+    {
+      "date": "2099-01-13",
+      "value": 110.5,
+      "unit": "litres",
+      "source": "fake-fixture",
+      "freshness": "complete"
+    },
+    {
+      "date": "2099-01-14",
+      "value": 0.112,
+      "unit": "m3",
+      "source": "fake-fixture",
+      "freshness": "complete"
+    }
+  ]
+}

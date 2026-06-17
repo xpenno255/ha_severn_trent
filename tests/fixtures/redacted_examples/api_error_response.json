@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "FAKE_ERROR",
+    "message": "A fake redacted API error occurred.",
+    "correlationId": "REQUEST-REDACTED"
+  },
+  "status": 400
+}

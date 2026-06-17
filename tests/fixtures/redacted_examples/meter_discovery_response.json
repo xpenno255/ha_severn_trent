@@ -1,0 +1,12 @@
+{
+  "accountId": "ACCOUNT-REDACTED",
+  "meters": [
+    {
+      "meterId": "METER-REDACTED",
+      "serialNumber": "METER-REDACTED",
+      "meterType": "smart_water",
+      "status": "active",
+      "unit": "m3"
+    }
+  ]
+}
