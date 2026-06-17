@@ -29,6 +29,12 @@ The initial Yorkshire Water sensor set is intentionally practical:
 | Year to Date | `sensor.yorkshire_water_year_to_date` | L |
 | Meter Reading | `sensor.yorkshire_water_meter_reading` | m³ |
 | Estimated Cumulative Usage | `sensor.yorkshire_water_estimated_cumulative_usage` | m³ |
+| Yesterday Cost | `sensor.yorkshire_water_yesterday_cost` | GBP |
+| Today Cost | `sensor.yorkshire_water_today_cost` | GBP |
+| Week to Date Cost | `sensor.yorkshire_water_week_to_date_cost` | GBP |
+| Previous Week Cost | `sensor.yorkshire_water_previous_week_cost` | GBP |
+| Month to Date Cost | `sensor.yorkshire_water_month_to_date_cost` | GBP |
+| Year to Date Cost | `sensor.yorkshire_water_year_to_date_cost` | GBP |
 | Continuous Flow Alarm | `sensor.yorkshire_water_continuous_flow_alarm` | diagnostic |
 | Data Latest Update Status | `sensor.yorkshire_water_data_latest_update_status` | diagnostic |
 | Status | `sensor.yorkshire_water_status` | diagnostic |
@@ -44,6 +50,14 @@ Home Assistant's Energy Dashboard water section needs a cumulative water sensor 
 Use `sensor.yorkshire_water_estimated_cumulative_usage` for Energy Dashboard water consumption. It reports cubic metres and is estimated from the usage totals available from Yorkshire Water, not from an official physical meter-reading endpoint. If a later API response contains less usage than a previous refresh, the integration preserves the previous cumulative value so the sensor remains monotonic.
 
 To add it, open Settings -> Dashboards -> Energy -> Water consumption, then select Estimated Cumulative Usage.
+
+## Cost Tracking
+
+Cost sensors are separate from the Energy Dashboard water usage sensor. Home Assistant's Energy Dashboard should use the cumulative water sensor in m³, while the cost sensors are normal monetary sensors in GBP for Lovelace cards, reports, and dashboards.
+
+Yorkshire Water currently provides clean water, sewerage, and total cost values in the captured daily and monthly/yearly usage payloads. The integration exposes period total cost sensors for yesterday, today, week to date, previous week, month to date, and year to date, with clean water and sewerage breakdowns retained as attributes where available.
+
+These values are portal and tariff estimates. They may differ from final bill calculations after billing adjustments, tariff changes, rounding, or account-specific charges.
 
 ## Installation
 

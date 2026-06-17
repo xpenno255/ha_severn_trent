@@ -62,6 +62,24 @@
       "estimated_cumulative_usage": {
         "name": "Estimated Cumulative Usage"
       },
+      "yesterday_cost": {
+        "name": "Yesterday Cost"
+      },
+      "today_cost": {
+        "name": "Today Cost"
+      },
+      "week_to_date_cost": {
+        "name": "Week to Date Cost"
+      },
+      "previous_week_cost": {
+        "name": "Previous Week Cost"
+      },
+      "month_to_date_cost": {
+        "name": "Month to Date Cost"
+      },
+      "year_to_date_cost": {
+        "name": "Year to Date Cost"
+      },
       "continuous_flow_alarm": {
         "name": "Continuous Flow Alarm"
       },

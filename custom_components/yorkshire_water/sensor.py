@@ -55,6 +55,29 @@ def _period_attrs(
     return attrs
 
 
+def _cost_attrs(
+    data: dict[str, Any],
+    start_key: str,
+    end_key: str,
+    prefix: str,
+) -> dict[str, Any]:
+    """Build common cost attributes."""
+    return {
+        "source_period_start": data.get(start_key),
+        "source_period_end": data.get(end_key),
+        "included_day_count": data.get(f"{prefix}_included_day_count"),
+        "estimated_day_count": data.get(f"{prefix}_estimated_day_count"),
+        "missing_day_count": data.get(f"{prefix}_missing_day_count"),
+        "clean_water_cost": data.get(f"{prefix}_clean_water_cost"),
+        "sewerage_cost": data.get(f"{prefix}_sewerage_cost"),
+        "total_cost": data.get(f"{prefix}_total_cost"),
+        "raw_unit": "GBP",
+        "latest_data_date": data.get("latest_data_date"),
+        "latest_update_date": data.get("latest_update_date"),
+        "last_successful_update": data.get("last_successful_update"),
+    }
+
+
 SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
     YorkshireWaterSensorEntityDescription(
         key="yesterday_usage",
@@ -218,6 +241,102 @@ SENSORS: tuple[YorkshireWaterSensorEntityDescription, ...] = (
             "status_detail": data.get("estimated_cumulative_status_detail"),
             "last_successful_update": data.get("last_successful_update"),
         },
+    ),
+    YorkshireWaterSensorEntityDescription(
+        key="yesterday_cost",
+        translation_key="yesterday_cost",
+        name="Yesterday Cost",
+        icon="mdi:currency-gbp",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement="GBP",
+        value_fn=lambda data: data.get("yesterday_total_cost"),
+        attrs_fn=lambda data: _cost_attrs(
+            data,
+            "yesterday_start",
+            "yesterday_end",
+            "yesterday",
+        ),
+    ),
+    YorkshireWaterSensorEntityDescription(
+        key="today_cost",
+        translation_key="today_cost",
+        name="Today Cost",
+        icon="mdi:currency-gbp",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement="GBP",
+        value_fn=lambda data: data.get("today_total_cost"),
+        attrs_fn=lambda data: _cost_attrs(
+            data,
+            "today_start",
+            "today_end",
+            "today",
+        ),
+    ),
+    YorkshireWaterSensorEntityDescription(
+        key="week_to_date_cost",
+        translation_key="week_to_date_cost",
+        name="Week to Date Cost",
+        icon="mdi:currency-gbp",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement="GBP",
+        value_fn=lambda data: data.get("week_to_date_total_cost"),
+        attrs_fn=lambda data: _cost_attrs(
+            data,
+            "week_start",
+            "week_end",
+            "week_to_date",
+        ),
+    ),
+    YorkshireWaterSensorEntityDescription(
+        key="previous_week_cost",
+        translation_key="previous_week_cost",
+        name="Previous Week Cost",
+        icon="mdi:currency-gbp",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement="GBP",
+        value_fn=lambda data: data.get("previous_week_total_cost"),
+        attrs_fn=lambda data: _cost_attrs(
+            data,
+            "previous_week_start",
+            "previous_week_end",
+            "previous_week",
+        ),
+    ),
+    YorkshireWaterSensorEntityDescription(
+        key="month_to_date_cost",
+        translation_key="month_to_date_cost",
+        name="Month to Date Cost",
+        icon="mdi:currency-gbp",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement="GBP",
+        value_fn=lambda data: data.get("month_to_date_total_cost"),
+        attrs_fn=lambda data: _cost_attrs(
+            data,
+            "month_start",
+            "latest_data_date",
+            "month_to_date",
+        ),
+    ),
+    YorkshireWaterSensorEntityDescription(
+        key="year_to_date_cost",
+        translation_key="year_to_date_cost",
+        name="Year to Date Cost",
+        icon="mdi:currency-gbp",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement="GBP",
+        value_fn=lambda data: data.get("year_to_date_total_cost"),
+        attrs_fn=lambda data: _cost_attrs(
+            data,
+            "year_start",
+            "latest_data_date",
+            "year_to_date",
+        ),
     ),
     YorkshireWaterSensorEntityDescription(
         key="continuous_flow_alarm",

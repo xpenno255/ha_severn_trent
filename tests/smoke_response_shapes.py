@@ -187,7 +187,15 @@ async def _main() -> None:
     assert summary["estimated_day_count"] == 0
     assert summary["missing_day_count"] == 0
     assert summary["yesterday_clean_water_cost"] == 0.5
+    assert isinstance(summary["yesterday_clean_water_cost"], float)
+    assert summary["yesterday_sewerage_cost"] == 0.61
+    assert isinstance(summary["yesterday_sewerage_cost"], float)
+    assert summary["yesterday_total_cost"] == 1.11
+    assert summary["today_total_cost"] is None
+    assert summary["week_to_date_total_cost"] == 2.11
+    assert summary["previous_week_total_cost"] == 6.35
     assert summary["month_to_date_total_cost"] == 11.27
+    assert summary["year_to_date_total_cost"] is None
     assert summary["meter_reading_m3"] is None
     assert summary["meter_reading_status"] == "not_implemented"
     assert summary["status"] == "ok"
@@ -200,6 +208,7 @@ async def _main() -> None:
     yearly_summary = await yearly_client.async_fetch_usage_summary(today=date(2026, 6, 17))
     assert yearly_summary["year_to_date_litres"] == 5432
     assert yearly_summary["year_to_date_included_day_count"] == 2
+    assert yearly_summary["year_to_date_total_cost"] == 25.11
     assert yearly_summary["estimated_cumulative_usage_m3"] == 5.432
 
     session.usage_fixture = "monthly_summary_shrunk_response.json"
@@ -215,6 +224,18 @@ async def _main() -> None:
     sensor_source = (ROOT / "custom_components/yorkshire_water/sensor.py").read_text()
     cumulative_block = _sensor_block(sensor_source, "estimated_cumulative_usage")
     assert "state_class=SensorStateClass.TOTAL_INCREASING" in cumulative_block
+    for cost_key in (
+        "yesterday_cost",
+        "today_cost",
+        "week_to_date_cost",
+        "previous_week_cost",
+        "month_to_date_cost",
+        "year_to_date_cost",
+    ):
+        cost_block = _sensor_block(sensor_source, cost_key)
+        assert "device_class=SensorDeviceClass.MONETARY" in cost_block
+        assert "state_class=SensorStateClass.TOTAL" in cost_block
+        assert 'native_unit_of_measurement="GBP"' in cost_block
     for period_key in (
         "yesterday_usage",
         "today_usage",
