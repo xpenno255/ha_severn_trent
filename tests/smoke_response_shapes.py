@@ -35,6 +35,45 @@ def _load_api_module():
     return sys.modules["custom_components.yorkshire_water.api"]
 
 
+def _load_integration_module():
+    """Load __init__.py with minimal Home Assistant stubs."""
+    homeassistant = types.ModuleType("homeassistant")
+    config_entries = types.ModuleType("homeassistant.config_entries")
+    const = types.ModuleType("homeassistant.const")
+    core = types.ModuleType("homeassistant.core")
+    exceptions = types.ModuleType("homeassistant.exceptions")
+    helpers = types.ModuleType("homeassistant.helpers")
+    aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
+    update_coordinator = types.ModuleType("homeassistant.helpers.update_coordinator")
+
+    config_entries.ConfigEntry = type("ConfigEntry", (), {})
+    const.Platform = types.SimpleNamespace(SENSOR="sensor")
+    core.HomeAssistant = type("HomeAssistant", (), {})
+    exceptions.ConfigEntryAuthFailed = type("ConfigEntryAuthFailed", (Exception,), {})
+    aiohttp_client.async_get_clientsession = lambda hass: None
+    update_coordinator.DataUpdateCoordinator = type("DataUpdateCoordinator", (), {})
+    update_coordinator.UpdateFailed = type("UpdateFailed", (Exception,), {})
+
+    sys.modules["homeassistant"] = homeassistant
+    sys.modules["homeassistant.config_entries"] = config_entries
+    sys.modules["homeassistant.const"] = const
+    sys.modules["homeassistant.core"] = core
+    sys.modules["homeassistant.exceptions"] = exceptions
+    sys.modules["homeassistant.helpers"] = helpers
+    sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client
+    sys.modules["homeassistant.helpers.update_coordinator"] = update_coordinator
+
+    spec = importlib.util.spec_from_file_location(
+        "custom_components.yorkshire_water.__init__",
+        ROOT / "custom_components/yorkshire_water/__init__.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 class _Response:
     def __init__(self, payload, status: int = 200) -> None:
         self.payload = payload
@@ -106,8 +145,21 @@ def _fake_jwt(payload: dict) -> str:
     return f"{encode({'alg': 'none'})}.{encode(payload)}.signature"
 
 
+class _FakeLogger:
+    def __init__(self) -> None:
+        self.debug_messages: list[str] = []
+        self.warning_messages: list[str] = []
+
+    def debug(self, message, *args, **kwargs) -> None:
+        self.debug_messages.append(str(message))
+
+    def warning(self, message, *args, **kwargs) -> None:
+        self.warning_messages.append(str(message))
+
+
 async def _main() -> None:
     api = _load_api_module()
+    integration = _load_integration_module()
 
     assert api.normalize_bearer_token("  'abc123'  ") == "abc123"
     assert api.normalize_bearer_token('Bearer "abc123"') == "abc123"
@@ -159,6 +211,57 @@ async def _main() -> None:
     redacted = api.YorkshireWaterAPI.redact(exchange_body)
     assert redacted["code"] == "<redacted>"
     assert redacted["code_verifier"] == "<redacted>"
+
+    class SyncReauthEntry:
+        called = False
+
+        def async_start_reauth(self, hass):
+            self.called = True
+            return None
+
+    sync_entry = SyncReauthEntry()
+    assert await integration.async_start_reauth_safely(
+        sync_entry,
+        object(),
+        _FakeLogger(),
+    )
+    assert sync_entry.called is True
+
+    class AwaitableReauthEntry:
+        called = False
+        awaited = False
+
+        def async_start_reauth(self, hass):
+            self.called = True
+
+            async def _inner():
+                self.awaited = True
+
+            return _inner()
+
+    awaitable_entry = AwaitableReauthEntry()
+    assert await integration.async_start_reauth_safely(
+        awaitable_entry,
+        object(),
+        _FakeLogger(),
+    )
+    assert awaitable_entry.called is True
+    assert awaitable_entry.awaited is True
+
+    class FailingReauthEntry:
+        def async_start_reauth(self, hass):
+            raise RuntimeError("TOKEN-REDACTED")
+
+    logger = _FakeLogger()
+    assert not await integration.async_start_reauth_safely(
+        FailingReauthEntry(),
+        object(),
+        logger,
+    )
+    assert logger.warning_messages == [
+        "Unable to start Yorkshire Water reauthentication flow"
+    ]
+    assert "TOKEN-REDACTED" not in json.dumps(logger.warning_messages)
 
     token_json = json.dumps(
         {

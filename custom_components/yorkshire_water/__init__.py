@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import inspect
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -39,6 +40,31 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 
+async def async_start_reauth_safely(
+    entry: ConfigEntry,
+    hass: HomeAssistant,
+    logger: logging.Logger = _LOGGER,
+) -> bool:
+    """Start Home Assistant reauth when available without breaking refresh."""
+    start_reauth = getattr(entry, "async_start_reauth", None)
+    if start_reauth is None:
+        logger.debug("Yorkshire Water reauthentication helper is not available")
+        return False
+
+    try:
+        result = start_reauth(hass)
+        if inspect.isawaitable(result):
+            await result
+    except Exception:
+        logger.warning(
+            "Unable to start Yorkshire Water reauthentication flow",
+            exc_info=True,
+        )
+        return False
+
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Yorkshire Water from a config entry."""
     _LOGGER.info("Setting up Yorkshire Water integration")
@@ -65,11 +91,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         nonlocal reauth_started
         if reauth_started:
             return
-        start_reauth = getattr(entry, "async_start_reauth", None)
-        if start_reauth is None:
-            return
         reauth_started = True
-        await start_reauth(hass)
+        await async_start_reauth_safely(entry, hass)
 
     async def async_update_data() -> dict:
         """Fetch data from Yorkshire Water."""
