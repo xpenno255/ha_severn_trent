@@ -68,6 +68,16 @@ OAuth constants currently used by the integration foundation:
 }
 ```
 
+The captured Yorkshire Water website authorization request currently uses this scope set:
+
+```text
+openid user-names css-onlineaccount-api css-registration-api
+```
+
+It does not include `offline_access`, and no `refresh_token` has been observed in token responses captured so far. The integration therefore keeps this captured scope set as the default.
+
+An experimental authorization-parameter builder can append `offline_access` for controlled testing only. Do not enable this as the default unless redacted browser testing proves Yorkshire Water accepts the scope and returns a refresh token. If Yorkshire Water rejects the request with `invalid_scope`, `invalid_request`, or a similar token endpoint error, record only the safe error code/status and do not share authorization codes, code verifiers, code challenges, state values, tokens, cookies, or full callback URLs.
+
 The authorization URL endpoint has not yet been confirmed from a safely redacted capture. Until that is captured, the config flow supports an experimental manual code exchange path where a user may paste a callback URL or authorization code plus the matching PKCE code verifier. Do not share either value publicly.
 
 If a future token response includes `refresh_token`, redact it like an access token. The integration can attempt a defensive refresh-token grant only when Yorkshire Water actually issues one.

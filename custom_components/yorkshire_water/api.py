@@ -122,6 +122,10 @@ class YorkshireWaterStateMismatchError(YorkshireWaterAuthError):
     """OAuth state did not match the expected value."""
 
 
+class YorkshireWaterOfflineAccessUnsupportedError(YorkshireWaterAuthError):
+    """The OAuth server rejected the experimental offline_access scope."""
+
+
 def parse_token_response(data: dict[str, Any]) -> dict[str, Any]:
     """Parse OAuth token response metadata without returning raw token values."""
     _ensure_dict(data, "Token response payload")
@@ -279,13 +283,17 @@ def build_oauth_authorization_params(
     *,
     client_id: str = YORKSHIRE_WATER_OAUTH_CLIENT_ID,
     redirect_uri: str = YORKSHIRE_WATER_OAUTH_REDIRECT_URI,
+    include_offline_access: bool = False,
 ) -> dict[str, str]:
     """Build OAuth authorization query parameters for a captured authorize endpoint."""
+    scopes = list(YORKSHIRE_WATER_OAUTH_SCOPES)
+    if include_offline_access and "offline_access" not in scopes:
+        scopes.append("offline_access")
     return {
         "client_id": client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
-        "scope": " ".join(YORKSHIRE_WATER_OAUTH_SCOPES),
+        "scope": " ".join(scopes),
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
         "state": state,
@@ -325,6 +333,16 @@ def build_expired_token_status_data(
         "latest_data_date": latest_data_date,
         "latest_update_date": latest_update_date,
         "last_successful_update": last_successful_update,
+    }
+
+
+def build_offline_access_not_supported_status_data() -> dict[str, Any]:
+    """Build a safe payload for an OAuth offline_access rejection."""
+    return {
+        "status": "reauth_required",
+        "status_detail": "offline_access_not_supported",
+        "token_status": "offline_access_not_supported",
+        "refresh_available": False,
     }
 
 
@@ -810,9 +828,10 @@ class YorkshireWaterAPI:
                 data=form,
                 timeout=30,
             ) as response:
-                await self._raise_for_status(response)
                 status = response.status
                 payload = await response.json(content_type=None)
+                if status >= 400:
+                    self._raise_for_token_error(status, payload)
         except ClientError as err:
             raise YorkshireWaterError(f"Error communicating with Yorkshire Water: {err}") from err
 
@@ -824,6 +843,23 @@ class YorkshireWaterAPI:
             _json_type_name(payload),
         )
         return payload
+
+    def _raise_for_token_error(self, status: int, payload: Any) -> None:
+        """Map token endpoint errors without exposing response content."""
+        if isinstance(payload, dict):
+            error_code = str(payload.get("error") or "")
+            if error_code in {"invalid_scope", "invalid_request"}:
+                raise YorkshireWaterOfflineAccessUnsupportedError(
+                    "offline_access_not_supported"
+                )
+            if error_code:
+                raise YorkshireWaterAuthError("Yorkshire Water token request failed")
+
+        if status == 401:
+            raise YorkshireWaterExpiredSessionError("Yorkshire Water session expired")
+        if status == 403:
+            raise YorkshireWaterAuthError("Yorkshire Water rejected the supplied credentials")
+        raise YorkshireWaterAuthError(f"Yorkshire Water token endpoint returned HTTP {status}")
 
     def _apply_auth_data(self, auth_data: dict[str, Any]) -> None:
         """Apply new auth data in memory and queue a safe config entry update."""
@@ -1241,6 +1277,7 @@ class YorkshireWaterAPI:
             "last_successful_update": datetime.now().isoformat(timespec="seconds"),
             "status": "ok",
             "token_status": "token_valid",
+            "refresh_available": bool(self.refresh_token),
         }
 
     def _estimated_cumulative_usage(

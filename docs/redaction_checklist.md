@@ -22,7 +22,7 @@ Before sharing any Yorkshire Water portal capture, check every section below.
 - [ ] Remove `id_token` values.
 - [ ] Remove bearer tokens.
 - [ ] Remove refresh tokens.
-- [ ] Remove authorization codes, PKCE code verifiers, one-time codes, state values, nonce values, and session IDs.
+- [ ] Remove authorization codes, PKCE code verifiers, PKCE code challenges, one-time codes, state values, nonce values, and session IDs.
 - [ ] Keep only safe metadata such as `expires_in`, `token_type`, and redacted scope if needed.
 
 ## Account Identifiers

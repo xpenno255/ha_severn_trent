@@ -95,6 +95,7 @@ class _Session:
         usage_fixture: str = "monthly_summary_list_response.json",
         daily_fixture: str = "daily_usage_object_response.json",
         token_payload=None,
+        token_status: int = 200,
     ) -> None:
         self.usage_fixture = usage_fixture
         self.daily_fixture = daily_fixture
@@ -105,6 +106,7 @@ class _Session:
             "token_type": "Bearer",
             "scope": "openid css-onlineaccount-api",
         }
+        self.token_status = token_status
         self.token_requests: list[dict] = []
         self.api_requests: list[str] = []
 
@@ -113,7 +115,7 @@ class _Session:
             assert method == "POST"
             assert headers["Content-Type"] == "application/x-www-form-urlencoded"
             self.token_requests.append(data)
-            return _Response(self.token_payload)
+            return _Response(self.token_payload, status=self.token_status)
         if "meter-details" in url:
             self.api_requests.append("meter_details")
             return _Response(_fixture("meter_discovery_response.json"))
@@ -175,6 +177,13 @@ async def _main() -> None:
     assert auth_params["code_challenge_method"] == "S256"
     assert auth_params["state"] == "STATE-REDACTED"
     assert "css-onlineaccount-api" in auth_params["scope"]
+    assert "offline_access" not in auth_params["scope"].split()
+    offline_auth_params = api.build_oauth_authorization_params(
+        challenge,
+        "STATE-REDACTED",
+        include_offline_access=True,
+    )
+    assert "offline_access" in offline_auth_params["scope"].split()
     api.validate_oauth_state("STATE-REDACTED", "STATE-REDACTED")
     try:
         api.validate_oauth_state("STATE-REDACTED", "STATE-MISMATCH-REDACTED")
@@ -323,6 +332,33 @@ async def _main() -> None:
     )
     assert exchanged["access_token"] == "ACCESS-TOKEN-REDACTED"
     assert token_session.token_requests[-1] == exchange_body
+
+    invalid_scope_session = _Session(
+        token_payload={
+            "error": "invalid_scope",
+            "error_description": "offline access is not available",
+        },
+        token_status=400,
+    )
+    invalid_scope_client = api.YorkshireWaterAPI(invalid_scope_session, None)
+    try:
+        await invalid_scope_client.async_exchange_authorization_code(
+            "AUTH-CODE-REDACTED",
+            "CODE-VERIFIER-REDACTED",
+            now=fixed_now,
+        )
+    except api.YorkshireWaterOfflineAccessUnsupportedError as err:
+        assert str(err) == "offline_access_not_supported"
+        assert "AUTH-CODE-REDACTED" not in str(err)
+        assert "CODE-VERIFIER-REDACTED" not in str(err)
+    else:
+        raise AssertionError("Expected invalid_scope to be handled safely")
+    assert api.build_offline_access_not_supported_status_data() == {
+        "status": "reauth_required",
+        "status_detail": "offline_access_not_supported",
+        "token_status": "offline_access_not_supported",
+        "refresh_available": False,
+    }
 
     expired_json = json.dumps(
         {
@@ -520,6 +556,7 @@ async def _main() -> None:
         today=date(2026, 6, 17)
     )
     assert refreshed_summary["status"] == "ok"
+    assert refreshed_summary["refresh_available"] is True
     assert refresh_session.token_requests[0] == {
         "client_id": "css-onlineaccount-fe",
         "grant_type": "refresh_token",
