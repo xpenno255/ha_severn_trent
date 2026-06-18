@@ -35,6 +35,9 @@ DEFAULT_SCAN_INTERVAL_HOURS = 6
 # so production data fetch methods remain disabled below until redacted response
 # JSON structures are supplied.
 YORKSHIRE_WATER_TOKEN_ENDPOINT = "https://login.yorkshirewater.com/connect/token"
+YORKSHIRE_WATER_OAUTH_AUTHORIZE_ENDPOINT = (
+    "https://login.yorkshirewater.com/connect/authorize"
+)
 YORKSHIRE_WATER_OAUTH_CLIENT_ID = "css-onlineaccount-fe"
 YORKSHIRE_WATER_OAUTH_REDIRECT_URI = (
     "https://my.yorkshirewater.com/account/callback/response"

@@ -282,7 +282,8 @@ async def _main() -> None:
     assert hasattr(config_flow.YorkshireWaterConfigFlow, "async_get_options_flow")
     assert "CONF_OAUTH_REQUEST_OFFLINE_ACCESS" in config_flow_source
     assert "default=False" in config_flow_source
-    assert "async_step_oauth" in config_flow_source
+    assert "async_step_oauth_start" in config_flow_source
+    assert "async_step_oauth_callback" in config_flow_source
     assert "async_step_raw_token" in config_flow_source
     assert "async_step_token_json" in config_flow_source
     assert "self.config_entry =" not in config_flow_source
@@ -301,8 +302,37 @@ async def _main() -> None:
     token_json_form = await options_flow.async_step_token_json()
     assert "token_response_json" in token_json_form["data_schema"]
     assert "oauth_request_offline_access" not in token_json_form["data_schema"]
-    oauth_form = await options_flow.async_step_oauth()
-    assert "oauth_request_offline_access" in oauth_form["data_schema"]
+    oauth_start_form = await options_flow.async_step_oauth_start()
+    assert oauth_start_form["step_id"] == "oauth_start"
+    assert "oauth_request_offline_access" in oauth_start_form["data_schema"]
+    assert "oauth_callback_url" not in oauth_start_form["data_schema"]
+    assert "oauth_authorization_code" not in oauth_start_form["data_schema"]
+    assert "oauth_code_verifier" not in oauth_start_form["data_schema"]
+    oauth_callback_form = await options_flow.async_step_oauth_start(
+        {"oauth_request_offline_access": False}
+    )
+    assert oauth_callback_form["step_id"] == "oauth_callback"
+    assert "authorization_url" in oauth_callback_form["description_placeholders"]
+    assert "offline_access" not in oauth_callback_form["description_placeholders"][
+        "authorization_url"
+    ]
+    assert options_flow._oauth_code_verifier is not None
+    assert options_flow._oauth_state is not None
+    assert "oauth_callback_url" in oauth_callback_form["data_schema"]
+    assert "oauth_authorization_code" in oauth_callback_form["data_schema"]
+    assert "oauth_code_verifier" not in oauth_callback_form["data_schema"]
+    offline_options_flow = config_flow.YorkshireWaterOptionsFlow(fake_entry)
+    offline_options_flow.hass = _FakeHass()
+    offline_callback_form = await offline_options_flow.async_step_oauth_start(
+        {"oauth_request_offline_access": True}
+    )
+    assert "offline_access" in offline_callback_form["description_placeholders"][
+        "authorization_url"
+    ]
+    routed_oauth_form = await offline_options_flow.async_step_init(
+        {"auth_update_mode": "oauth_pkce"}
+    )
+    assert routed_oauth_form["step_id"] == "oauth_start"
     token_json_options_result = await options_flow.async_step_token_json(
         {
             "token_response_json": json.dumps(
@@ -329,6 +359,65 @@ async def _main() -> None:
     missing_auth_options_flow.hass = _FakeHass()
     missing_auth_form = await missing_auth_options_flow.async_step_init()
     assert missing_auth_form["description_placeholders"]["auth_status"] == "auth_not_configured"
+    oauth_success_flow = config_flow.YorkshireWaterOptionsFlow(_FakeConfigEntry())
+    oauth_success_flow.hass = _FakeHass()
+    token_session_for_options = _Session()
+    config_flow.async_get_clientsession = lambda hass: token_session_for_options
+    await oauth_success_flow.async_step_oauth_start(
+        {"oauth_request_offline_access": False}
+    )
+    stored_verifier = oauth_success_flow._oauth_code_verifier
+    stored_state = oauth_success_flow._oauth_state
+    oauth_result = await oauth_success_flow.async_step_oauth_callback(
+        {
+            "oauth_callback_url": (
+                "https://my.yorkshirewater.com/account/callback/response?"
+                f"code=AUTH-CODE-REDACTED&state={stored_state}"
+            )
+        }
+    )
+    assert oauth_result["type"] == "create_entry"
+    assert token_session_for_options.token_requests[-1]["code_verifier"] == stored_verifier
+    assert oauth_success_flow.hass.config_entries.updated_data["auth_type"] == "oauth_pkce"
+    assert (
+        oauth_success_flow.hass.config_entries.updated_data["refresh_token"] is None
+    )
+    assert (
+        oauth_success_flow.hass.config_entries.updated_data[
+            "oauth_request_offline_access"
+        ]
+        is False
+    )
+    oauth_raw_code_flow = config_flow.YorkshireWaterOptionsFlow(_FakeConfigEntry())
+    oauth_raw_code_flow.hass = _FakeHass()
+    raw_code_session_for_options = _Session()
+    config_flow.async_get_clientsession = lambda hass: raw_code_session_for_options
+    await oauth_raw_code_flow.async_step_oauth_start(
+        {"oauth_request_offline_access": False}
+    )
+    raw_code_verifier = oauth_raw_code_flow._oauth_code_verifier
+    raw_code_result = await oauth_raw_code_flow.async_step_oauth_callback(
+        {"oauth_authorization_code": "AUTH-CODE-REDACTED"}
+    )
+    assert raw_code_result["type"] == "create_entry"
+    assert raw_code_session_for_options.token_requests[-1]["code_verifier"] == raw_code_verifier
+    oauth_state_mismatch_flow = config_flow.YorkshireWaterOptionsFlow(_FakeConfigEntry())
+    oauth_state_mismatch_flow.hass = _FakeHass()
+    await oauth_state_mismatch_flow.async_step_oauth_start(
+        {"oauth_request_offline_access": False}
+    )
+    mismatch_result = await oauth_state_mismatch_flow.async_step_oauth_callback(
+        {
+            "oauth_callback_url": (
+                "https://my.yorkshirewater.com/account/callback/response?"
+                "code=AUTH-CODE-REDACTED&state=STATE-MISMATCH-REDACTED"
+            )
+        }
+    )
+    assert mismatch_result["type"] == "form"
+    assert mismatch_result["step_id"] == "oauth_callback"
+    assert mismatch_result["errors"] == {"base": "invalid_oauth"}
+    assert "oauth_code_verifier" not in str(mismatch_result)
     api.validate_oauth_state("STATE-REDACTED", "STATE-REDACTED")
     try:
         api.validate_oauth_state("STATE-REDACTED", "STATE-MISMATCH-REDACTED")

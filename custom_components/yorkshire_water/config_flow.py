@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from typing import Any
+from urllib.parse import urlencode
 
 import voluptuous as vol
 
@@ -22,6 +23,8 @@ from .api import (
     build_token_auth_data,
     extract_authorization_code,
     generate_pkce_code_challenge,
+    generate_pkce_code_verifier,
+    generate_oauth_state,
     validate_oauth_state,
 )
 from .const import (
@@ -47,6 +50,7 @@ from .const import (
     CONF_TOKEN_RESPONSE_JSON,
     DEFAULT_NAME,
     DOMAIN,
+    YORKSHIRE_WATER_OAUTH_AUTHORIZE_ENDPOINT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -64,6 +68,21 @@ def build_experimental_oauth_authorization_params(
         state,
         include_offline_access=request_offline_access,
     )
+
+
+def build_experimental_oauth_authorization_url(
+    code_verifier: str,
+    state: str,
+    *,
+    request_offline_access: bool = False,
+) -> str:
+    """Build the experimental OAuth authorization URL for guided testing."""
+    params = build_experimental_oauth_authorization_params(
+        code_verifier,
+        state,
+        request_offline_access=request_offline_access,
+    )
+    return f"{YORKSHIRE_WATER_OAUTH_AUTHORIZE_ENDPOINT}?{urlencode(params)}"
 
 
 def _safe_auth_status(data: dict[str, Any]) -> str:
@@ -311,6 +330,10 @@ class YorkshireWaterOptionsFlow(config_entries.OptionsFlow):
         """Initialize options flow."""
         self._config_entry = config_entry
         self.context: dict[str, Any] = {}
+        self._oauth_code_verifier: str | None = None
+        self._oauth_state: str | None = None
+        self._oauth_authorization_url: str | None = None
+        self._oauth_request_offline_access = False
 
     async def async_step_init(
         self,
@@ -324,7 +347,7 @@ class YorkshireWaterOptionsFlow(config_entries.OptionsFlow):
             if mode == AUTH_UPDATE_MODE_RAW_TOKEN:
                 return await self.async_step_raw_token()
             if mode == AUTH_UPDATE_MODE_OAUTH_PKCE:
-                return await self.async_step_oauth()
+                return await self.async_step_oauth_start()
 
         return self.async_show_form(
             step_id="init",
@@ -390,11 +413,41 @@ class YorkshireWaterOptionsFlow(config_entries.OptionsFlow):
             errors=errors,
         )
 
-    async def async_step_oauth(
+    async def async_step_oauth_start(
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
-        """Update auth from experimental OAuth/PKCE callback details."""
+        """Generate experimental OAuth/PKCE details before callback entry."""
+        if user_input is not None:
+            self._oauth_request_offline_access = bool(
+                user_input.get(CONF_OAUTH_REQUEST_OFFLINE_ACCESS, False)
+            )
+            self._oauth_code_verifier = generate_pkce_code_verifier()
+            self._oauth_state = generate_oauth_state()
+            self._oauth_authorization_url = build_experimental_oauth_authorization_url(
+                self._oauth_code_verifier,
+                self._oauth_state,
+                request_offline_access=self._oauth_request_offline_access,
+            )
+            return await self.async_step_oauth_callback()
+
+        return self.async_show_form(
+            step_id="oauth_start",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_OAUTH_REQUEST_OFFLINE_ACCESS,
+                        default=False,
+                    ): bool,
+                }
+            ),
+        )
+
+    async def async_step_oauth_callback(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Update auth from an experimental OAuth/PKCE callback URL or code."""
         errors: dict[str, str] = {}
         if user_input is not None:
             oauth_callback = (
@@ -404,14 +457,19 @@ class YorkshireWaterOptionsFlow(config_entries.OptionsFlow):
                 user_input.get(CONF_OAUTH_AUTHORIZATION_CODE, "").strip() or None
             )
             try:
+                if not self._oauth_code_verifier:
+                    raise YorkshireWaterAuthError(
+                        "Yorkshire Water OAuth start step is required"
+                    )
                 auth_data, auth_type = await _async_build_auth_data(
                     self.hass,
-                    self.context,
+                    {
+                        **self.context,
+                        "oauth_state": self._oauth_state,
+                    },
                     oauth_callback_or_code=oauth_callback or oauth_code,
-                    oauth_code_verifier=user_input.get(CONF_OAUTH_CODE_VERIFIER),
-                    oauth_request_offline_access=bool(
-                        user_input.get(CONF_OAUTH_REQUEST_OFFLINE_ACCESS, False)
-                    ),
+                    oauth_code_verifier=self._oauth_code_verifier,
+                    oauth_request_offline_access=self._oauth_request_offline_access,
                 )
             except YorkshireWaterOfflineAccessUnsupportedError:
                 errors["base"] = "offline_access_not_supported"
@@ -425,25 +483,21 @@ class YorkshireWaterOptionsFlow(config_entries.OptionsFlow):
                 return await self._async_update_auth(
                     auth_data,
                     auth_type,
-                    request_offline_access=bool(
-                        user_input.get(CONF_OAUTH_REQUEST_OFFLINE_ACCESS, False)
-                    ),
+                    request_offline_access=self._oauth_request_offline_access,
                 )
 
         return self.async_show_form(
-            step_id="oauth",
+            step_id="oauth_callback",
             data_schema=vol.Schema(
                 {
                     vol.Optional(CONF_OAUTH_CALLBACK_URL): str,
                     vol.Optional(CONF_OAUTH_AUTHORIZATION_CODE): str,
-                    vol.Required(CONF_OAUTH_CODE_VERIFIER): str,
-                    vol.Optional(
-                        CONF_OAUTH_REQUEST_OFFLINE_ACCESS,
-                        default=False,
-                    ): bool,
                 }
             ),
             errors=errors,
+            description_placeholders={
+                "authorization_url": self._oauth_authorization_url or "",
+            },
         )
 
     async def _async_update_auth(
@@ -490,7 +544,8 @@ async def _async_build_auth_data(
             )
         code, returned_state = extract_authorization_code(oauth_callback_or_code)
         expected_state = context.get("oauth_state")
-        validate_oauth_state(returned_state, expected_state)
+        if returned_state is not None:
+            validate_oauth_state(returned_state, expected_state)
         if oauth_request_offline_access:
             build_experimental_oauth_authorization_params(
                 oauth_code_verifier,

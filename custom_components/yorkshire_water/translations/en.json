@@ -66,14 +66,19 @@
           "bearer_token": "Temporary access token"
         }
       },
-      "oauth": {
+      "oauth_start": {
         "title": "Experimental OAuth/PKCE Test",
-        "description": "Paste the callback URL or authorization code plus the matching PKCE code verifier. The offline access option is experimental and disabled by default.",
+        "description": "Choose whether to request offline access. The integration will generate the PKCE verifier, state, challenge, and authorization URL for this flow.",
+        "data": {
+          "oauth_request_offline_access": "Experimental: request offline access / refresh token"
+        }
+      },
+      "oauth_callback": {
+        "title": "Experimental OAuth/PKCE Callback",
+        "description": "Open this authorization URL, log in to Yorkshire Water, then paste the final callback URL or authorization code below: {authorization_url}",
         "data": {
           "oauth_callback_url": "OAuth callback URL",
-          "oauth_authorization_code": "OAuth authorization code",
-          "oauth_code_verifier": "OAuth PKCE code verifier",
-          "oauth_request_offline_access": "Experimental: request offline access / refresh token"
+          "oauth_authorization_code": "OAuth authorization code"
         }
       }
     },
