@@ -74,6 +74,44 @@ def _load_integration_module():
     return module
 
 
+def _load_config_flow_module():
+    """Load config_flow.py with minimal Home Assistant stubs."""
+    homeassistant = sys.modules.setdefault("homeassistant", types.ModuleType("homeassistant"))
+    config_entries = types.ModuleType("homeassistant.config_entries")
+    data_entry_flow = types.ModuleType("homeassistant.data_entry_flow")
+    helpers = sys.modules.setdefault("homeassistant.helpers", types.ModuleType("homeassistant.helpers"))
+    aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
+    voluptuous = types.ModuleType("voluptuous")
+
+    class ConfigFlow:
+        def __init_subclass__(cls, **kwargs):
+            return super().__init_subclass__()
+
+    config_entries.ConfigFlow = ConfigFlow
+    config_entries.ConfigEntry = type("ConfigEntry", (), {})
+    data_entry_flow.FlowResult = dict
+    aiohttp_client.async_get_clientsession = lambda hass: None
+    voluptuous.Schema = lambda schema: schema
+    voluptuous.Optional = lambda key, **kwargs: key
+
+    homeassistant.config_entries = config_entries
+    sys.modules["homeassistant.config_entries"] = config_entries
+    sys.modules["homeassistant.data_entry_flow"] = data_entry_flow
+    sys.modules["homeassistant.helpers"] = helpers
+    sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client
+    sys.modules["voluptuous"] = voluptuous
+
+    spec = importlib.util.spec_from_file_location(
+        "custom_components.yorkshire_water.config_flow",
+        ROOT / "custom_components/yorkshire_water/config_flow.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 class _Response:
     def __init__(self, payload, status: int = 200) -> None:
         self.payload = payload
@@ -162,6 +200,7 @@ class _FakeLogger:
 async def _main() -> None:
     api = _load_api_module()
     integration = _load_integration_module()
+    config_flow = _load_config_flow_module()
 
     assert api.normalize_bearer_token("  'abc123'  ") == "abc123"
     assert api.normalize_bearer_token('Bearer "abc123"') == "abc123"
@@ -184,6 +223,22 @@ async def _main() -> None:
         include_offline_access=True,
     )
     assert "offline_access" in offline_auth_params["scope"].split()
+    config_default_params = config_flow.build_experimental_oauth_authorization_params(
+        "CODE-VERIFIER-REDACTED",
+        "STATE-REDACTED",
+    )
+    assert "offline_access" not in config_default_params["scope"].split()
+    config_offline_params = config_flow.build_experimental_oauth_authorization_params(
+        "CODE-VERIFIER-REDACTED",
+        "STATE-REDACTED",
+        request_offline_access=True,
+    )
+    assert "offline_access" in config_offline_params["scope"].split()
+    config_flow_source = (
+        ROOT / "custom_components/yorkshire_water/config_flow.py"
+    ).read_text()
+    assert "CONF_OAUTH_REQUEST_OFFLINE_ACCESS" in config_flow_source
+    assert "default=False" in config_flow_source
     api.validate_oauth_state("STATE-REDACTED", "STATE-REDACTED")
     try:
         api.validate_oauth_state("STATE-REDACTED", "STATE-MISMATCH-REDACTED")
@@ -308,6 +363,12 @@ async def _main() -> None:
     )
     assert no_refresh_auth_data["refresh_token"] is None
     assert no_refresh_auth_data["token_metadata"]["has_refresh_token"] is False
+    assert api.build_token_auth_data(raw_access_token="TOKEN-REDACTED") == {
+        "access_token": "TOKEN-REDACTED",
+        "refresh_token": None,
+        "token_expires_at": None,
+        "token_metadata": None,
+    }
     fresh_reauth_data = api.build_token_auth_data(
         token_response_json=json.dumps(
             {

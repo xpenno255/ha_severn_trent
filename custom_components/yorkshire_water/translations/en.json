@@ -10,6 +10,7 @@
           "oauth_callback_url": "OAuth callback URL",
           "oauth_authorization_code": "OAuth authorization code",
           "oauth_code_verifier": "OAuth PKCE code verifier",
+          "oauth_request_offline_access": "Experimental: request offline access / refresh token",
           "account_reference": "Account reference",
           "meter_reference": "Meter reference"
         }
@@ -22,7 +23,8 @@
           "token_response_json": "Full token response JSON",
           "oauth_callback_url": "OAuth callback URL",
           "oauth_authorization_code": "OAuth authorization code",
-          "oauth_code_verifier": "OAuth PKCE code verifier"
+          "oauth_code_verifier": "OAuth PKCE code verifier",
+          "oauth_request_offline_access": "Experimental: request offline access / refresh token"
         }
       }
     },
@@ -30,6 +32,7 @@
       "invalid_auth": "Enter a valid access token",
       "invalid_token_response": "Enter a valid token response JSON object",
       "invalid_oauth": "Enter valid experimental OAuth callback/code details",
+      "offline_access_not_supported": "Yorkshire Water rejected the experimental offline access scope",
       "id_token_supplied": "This looks like an ID token. Paste the access_token value instead.",
       "token_expired": "The supplied token response is already expired",
       "unknown": "Unexpected error occurred"

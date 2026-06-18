@@ -16,9 +16,12 @@ from .api import (
     YorkshireWaterAPI,
     YorkshireWaterAuthError,
     YorkshireWaterExpiredSessionError,
+    YorkshireWaterOfflineAccessUnsupportedError,
     YorkshireWaterSchemaError,
+    build_oauth_authorization_params,
     build_token_auth_data,
     extract_authorization_code,
+    generate_pkce_code_challenge,
     validate_oauth_state,
 )
 from .const import (
@@ -33,6 +36,7 @@ from .const import (
     CONF_OAUTH_AUTHORIZATION_CODE,
     CONF_OAUTH_CALLBACK_URL,
     CONF_OAUTH_CODE_VERIFIER,
+    CONF_OAUTH_REQUEST_OFFLINE_ACCESS,
     CONF_REFRESH_TOKEN,
     CONF_SESSION_TOKEN,
     CONF_TOKEN_EXPIRES_AT,
@@ -42,6 +46,20 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def build_experimental_oauth_authorization_params(
+    code_verifier: str,
+    state: str,
+    *,
+    request_offline_access: bool = False,
+) -> dict[str, str]:
+    """Build experimental OAuth params for user-guided portal testing."""
+    return build_oauth_authorization_params(
+        generate_pkce_code_challenge(code_verifier),
+        state,
+        include_offline_access=request_offline_access,
+    )
 
 
 class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -74,6 +92,9 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             oauth_code_verifier = (
                 user_input.get(CONF_OAUTH_CODE_VERIFIER, "").strip() or None
             )
+            oauth_request_offline_access = bool(
+                user_input.get(CONF_OAUTH_REQUEST_OFFLINE_ACCESS, False)
+            )
             account_reference = (
                 user_input.get(CONF_ACCOUNT_REFERENCE, "").strip()
                 or user_input.get(CONF_ACCOUNT_ID, "").strip()
@@ -91,9 +112,12 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     token_response_json=token_response_json,
                     oauth_callback_or_code=oauth_callback or oauth_code,
                     oauth_code_verifier=oauth_code_verifier,
+                    oauth_request_offline_access=oauth_request_offline_access,
                 )
             except YorkshireWaterExpiredSessionError:
                 errors["base"] = "token_expired"
+            except YorkshireWaterOfflineAccessUnsupportedError:
+                errors["base"] = "offline_access_not_supported"
             except YorkshireWaterAuthError as err:
                 errors["base"] = (
                     "id_token_supplied"
@@ -137,6 +161,10 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Optional(CONF_OAUTH_CALLBACK_URL): str,
                     vol.Optional(CONF_OAUTH_AUTHORIZATION_CODE): str,
                     vol.Optional(CONF_OAUTH_CODE_VERIFIER): str,
+                    vol.Optional(
+                        CONF_OAUTH_REQUEST_OFFLINE_ACCESS,
+                        default=False,
+                    ): bool,
                     vol.Optional(CONF_ACCOUNT_REFERENCE): str,
                     vol.Optional(CONF_METER_REFERENCE): str,
                 }
@@ -171,15 +199,21 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             oauth_code_verifier = (
                 user_input.get(CONF_OAUTH_CODE_VERIFIER, "").strip() or None
             )
+            oauth_request_offline_access = bool(
+                user_input.get(CONF_OAUTH_REQUEST_OFFLINE_ACCESS, False)
+            )
             try:
                 auth_data, auth_type = await self._async_build_auth_data(
                     raw_access_token=bearer_token,
                     token_response_json=token_response_json,
                     oauth_callback_or_code=oauth_callback or oauth_code,
                     oauth_code_verifier=oauth_code_verifier,
+                    oauth_request_offline_access=oauth_request_offline_access,
                 )
             except YorkshireWaterExpiredSessionError:
                 errors["base"] = "token_expired"
+            except YorkshireWaterOfflineAccessUnsupportedError:
+                errors["base"] = "offline_access_not_supported"
             except YorkshireWaterAuthError as err:
                 errors["base"] = (
                     "id_token_supplied"
@@ -216,6 +250,10 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Optional(CONF_OAUTH_CALLBACK_URL): str,
                     vol.Optional(CONF_OAUTH_AUTHORIZATION_CODE): str,
                     vol.Optional(CONF_OAUTH_CODE_VERIFIER): str,
+                    vol.Optional(
+                        CONF_OAUTH_REQUEST_OFFLINE_ACCESS,
+                        default=False,
+                    ): bool,
                 }
             ),
             errors=errors,
@@ -228,6 +266,7 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         token_response_json: str | None = None,
         oauth_callback_or_code: str | None = None,
         oauth_code_verifier: str | None = None,
+        oauth_request_offline_access: bool = False,
     ) -> tuple[dict[str, Any], str]:
         """Build auth data from manual beta or experimental OAuth inputs."""
         if oauth_callback_or_code or oauth_code_verifier:
@@ -238,6 +277,12 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             code, returned_state = extract_authorization_code(oauth_callback_or_code)
             expected_state = self.context.get("oauth_state")
             validate_oauth_state(returned_state, expected_state)
+            if oauth_request_offline_access:
+                build_experimental_oauth_authorization_params(
+                    oauth_code_verifier,
+                    expected_state or "",
+                    request_offline_access=True,
+                )
             api = YorkshireWaterAPI(
                 async_get_clientsession(self.hass),
                 session_token=None,
