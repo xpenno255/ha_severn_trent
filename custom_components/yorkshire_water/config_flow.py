@@ -25,10 +25,14 @@ from .api import (
     validate_oauth_state,
 )
 from .const import (
+    AUTH_UPDATE_MODE_OAUTH_PKCE,
+    AUTH_UPDATE_MODE_RAW_TOKEN,
+    AUTH_UPDATE_MODE_TOKEN_JSON,
     AUTH_TYPE_BEARER_TOKEN,
     AUTH_TYPE_OAUTH_PKCE,
     CONF_ACCOUNT_ID,
     CONF_ACCOUNT_REFERENCE,
+    CONF_AUTH_UPDATE_MODE,
     CONF_AUTH_TYPE,
     CONF_BEARER_TOKEN,
     CONF_METER_ID,
@@ -62,6 +66,35 @@ def build_experimental_oauth_authorization_params(
     )
 
 
+def _safe_auth_status(data: dict[str, Any]) -> str:
+    """Return safe auth status text for forms."""
+    if data.get(CONF_REFRESH_TOKEN):
+        return "refresh_available"
+    if data.get(CONF_TOKEN_EXPIRES_AT):
+        return "token_expiry_known"
+    if data.get(CONF_BEARER_TOKEN) or data.get(CONF_SESSION_TOKEN):
+        return "manual_token_configured"
+    return "auth_not_configured"
+
+
+def _auth_update_mode_schema() -> vol.Schema:
+    """Build auth update mode schema."""
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_AUTH_UPDATE_MODE,
+                default=AUTH_UPDATE_MODE_TOKEN_JSON,
+            ): vol.In(
+                [
+                    AUTH_UPDATE_MODE_TOKEN_JSON,
+                    AUTH_UPDATE_MODE_RAW_TOKEN,
+                    AUTH_UPDATE_MODE_OAUTH_PKCE,
+                ]
+            )
+        }
+    )
+
+
 class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Yorkshire Water."""
 
@@ -70,6 +103,13 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the config flow."""
         self._reauth_entry: config_entries.ConfigEntry | None = None
+
+    @staticmethod
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Create the options flow."""
+        return YorkshireWaterOptionsFlow(config_entry)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -107,7 +147,9 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
             try:
-                auth_data, auth_type = await self._async_build_auth_data(
+                auth_data, auth_type = await _async_build_auth_data(
+                    self.hass,
+                    self.context,
                     raw_access_token=bearer_token or legacy_token,
                     token_response_json=token_response_json,
                     oauth_callback_or_code=oauth_callback or oauth_code,
@@ -203,7 +245,9 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 user_input.get(CONF_OAUTH_REQUEST_OFFLINE_ACCESS, False)
             )
             try:
-                auth_data, auth_type = await self._async_build_auth_data(
+                auth_data, auth_type = await _async_build_auth_data(
+                    self.hass,
+                    self.context,
                     raw_access_token=bearer_token,
                     token_response_json=token_response_json,
                     oauth_callback_or_code=oauth_callback or oauth_code,
@@ -259,44 +303,214 @@ class YorkshireWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def _async_build_auth_data(
-        self,
-        *,
-        raw_access_token: str | None = None,
-        token_response_json: str | None = None,
-        oauth_callback_or_code: str | None = None,
-        oauth_code_verifier: str | None = None,
-        oauth_request_offline_access: bool = False,
-    ) -> tuple[dict[str, Any], str]:
-        """Build auth data from manual beta or experimental OAuth inputs."""
-        if oauth_callback_or_code or oauth_code_verifier:
-            if not oauth_callback_or_code or not oauth_code_verifier:
-                raise YorkshireWaterAuthError(
-                    "Yorkshire Water OAuth code and code verifier are required"
-                )
-            code, returned_state = extract_authorization_code(oauth_callback_or_code)
-            expected_state = self.context.get("oauth_state")
-            validate_oauth_state(returned_state, expected_state)
-            if oauth_request_offline_access:
-                build_experimental_oauth_authorization_params(
-                    oauth_code_verifier,
-                    expected_state or "",
-                    request_offline_access=True,
-                )
-            api = YorkshireWaterAPI(
-                async_get_clientsession(self.hass),
-                session_token=None,
-            )
-            auth_data = await api.async_exchange_authorization_code(
-                code,
-                oauth_code_verifier,
-            )
-            return auth_data, AUTH_TYPE_OAUTH_PKCE
 
-        return (
-            build_token_auth_data(
-                raw_access_token=raw_access_token,
-                token_response_json=token_response_json,
-            ),
-            AUTH_TYPE_BEARER_TOKEN,
+class YorkshireWaterOptionsFlow(config_entries.OptionsFlow):
+    """Handle Yorkshire Water options for beta auth testing."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+        self.context: dict[str, Any] = {}
+
+    async def async_step_init(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Choose a safe auth update mode."""
+        if user_input is not None:
+            mode = user_input[CONF_AUTH_UPDATE_MODE]
+            if mode == AUTH_UPDATE_MODE_TOKEN_JSON:
+                return await self.async_step_token_json()
+            if mode == AUTH_UPDATE_MODE_RAW_TOKEN:
+                return await self.async_step_raw_token()
+            if mode == AUTH_UPDATE_MODE_OAUTH_PKCE:
+                return await self.async_step_oauth()
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=_auth_update_mode_schema(),
+            description_placeholders={
+                "auth_status": _safe_auth_status(dict(self.config_entry.data)),
+            },
         )
+
+    async def async_step_token_json(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Update auth from a full token response JSON."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                auth_data, auth_type = await _async_build_auth_data(
+                    self.hass,
+                    self.context,
+                    token_response_json=user_input.get(CONF_TOKEN_RESPONSE_JSON),
+                )
+            except YorkshireWaterExpiredSessionError:
+                errors["base"] = "token_expired"
+            except YorkshireWaterAuthError:
+                errors["base"] = "invalid_auth"
+            except YorkshireWaterSchemaError:
+                errors["base"] = "invalid_token_response"
+            else:
+                return await self._async_update_auth(auth_data, auth_type)
+
+        return self.async_show_form(
+            step_id="token_json",
+            data_schema=vol.Schema({vol.Required(CONF_TOKEN_RESPONSE_JSON): str}),
+            errors=errors,
+        )
+
+    async def async_step_raw_token(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Update auth from a raw access token."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                auth_data, auth_type = await _async_build_auth_data(
+                    self.hass,
+                    self.context,
+                    raw_access_token=user_input.get(CONF_BEARER_TOKEN),
+                )
+            except YorkshireWaterAuthError as err:
+                errors["base"] = (
+                    "id_token_supplied"
+                    if "id_token" in str(err)
+                    else "invalid_auth"
+                )
+            else:
+                return await self._async_update_auth(auth_data, auth_type)
+
+        return self.async_show_form(
+            step_id="raw_token",
+            data_schema=vol.Schema({vol.Required(CONF_BEARER_TOKEN): str}),
+            errors=errors,
+        )
+
+    async def async_step_oauth(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Update auth from experimental OAuth/PKCE callback details."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            oauth_callback = (
+                user_input.get(CONF_OAUTH_CALLBACK_URL, "").strip() or None
+            )
+            oauth_code = (
+                user_input.get(CONF_OAUTH_AUTHORIZATION_CODE, "").strip() or None
+            )
+            try:
+                auth_data, auth_type = await _async_build_auth_data(
+                    self.hass,
+                    self.context,
+                    oauth_callback_or_code=oauth_callback or oauth_code,
+                    oauth_code_verifier=user_input.get(CONF_OAUTH_CODE_VERIFIER),
+                    oauth_request_offline_access=bool(
+                        user_input.get(CONF_OAUTH_REQUEST_OFFLINE_ACCESS, False)
+                    ),
+                )
+            except YorkshireWaterOfflineAccessUnsupportedError:
+                errors["base"] = "offline_access_not_supported"
+            except YorkshireWaterExpiredSessionError:
+                errors["base"] = "token_expired"
+            except YorkshireWaterAuthError:
+                errors["base"] = "invalid_oauth"
+            except YorkshireWaterSchemaError:
+                errors["base"] = "invalid_token_response"
+            else:
+                return await self._async_update_auth(
+                    auth_data,
+                    auth_type,
+                    request_offline_access=bool(
+                        user_input.get(CONF_OAUTH_REQUEST_OFFLINE_ACCESS, False)
+                    ),
+                )
+
+        return self.async_show_form(
+            step_id="oauth",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_OAUTH_CALLBACK_URL): str,
+                    vol.Optional(CONF_OAUTH_AUTHORIZATION_CODE): str,
+                    vol.Required(CONF_OAUTH_CODE_VERIFIER): str,
+                    vol.Optional(
+                        CONF_OAUTH_REQUEST_OFFLINE_ACCESS,
+                        default=False,
+                    ): bool,
+                }
+            ),
+            errors=errors,
+        )
+
+    async def _async_update_auth(
+        self,
+        auth_data: dict[str, Any],
+        auth_type: str,
+        *,
+        request_offline_access: bool | None = None,
+    ) -> FlowResult:
+        """Persist updated auth data and reload the entry."""
+        data = {
+            **self.config_entry.data,
+            CONF_AUTH_TYPE: auth_type,
+            CONF_BEARER_TOKEN: auth_data["access_token"],
+            CONF_REFRESH_TOKEN: auth_data.get("refresh_token"),
+            CONF_TOKEN_EXPIRES_AT: auth_data["token_expires_at"],
+        }
+        if request_offline_access is not None:
+            data[CONF_OAUTH_REQUEST_OFFLINE_ACCESS] = request_offline_access
+
+        self.hass.config_entries.async_update_entry(
+            self.config_entry,
+            data=data,
+        )
+        await self.hass.config_entries.async_reload(self.config_entry.entry_id)
+        return self.async_create_entry(title="", data={})
+
+
+async def _async_build_auth_data(
+    hass: Any,
+    context: dict[str, Any],
+    *,
+    raw_access_token: str | None = None,
+    token_response_json: str | None = None,
+    oauth_callback_or_code: str | None = None,
+    oauth_code_verifier: str | None = None,
+    oauth_request_offline_access: bool = False,
+) -> tuple[dict[str, Any], str]:
+    """Build auth data from manual beta or experimental OAuth inputs."""
+    if oauth_callback_or_code or oauth_code_verifier:
+        if not oauth_callback_or_code or not oauth_code_verifier:
+            raise YorkshireWaterAuthError(
+                "Yorkshire Water OAuth code and code verifier are required"
+            )
+        code, returned_state = extract_authorization_code(oauth_callback_or_code)
+        expected_state = context.get("oauth_state")
+        validate_oauth_state(returned_state, expected_state)
+        if oauth_request_offline_access:
+            build_experimental_oauth_authorization_params(
+                oauth_code_verifier,
+                expected_state or "",
+                request_offline_access=True,
+            )
+        api = YorkshireWaterAPI(
+            async_get_clientsession(hass),
+            session_token=None,
+        )
+        auth_data = await api.async_exchange_authorization_code(
+            code,
+            oauth_code_verifier,
+        )
+        return auth_data, AUTH_TYPE_OAUTH_PKCE
+
+    return (
+        build_token_auth_data(
+            raw_access_token=raw_access_token,
+            token_response_json=token_response_json,
+        ),
+        AUTH_TYPE_BEARER_TOKEN,
+    )

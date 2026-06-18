@@ -43,6 +43,50 @@
       "unknown": "Unable to reauthenticate this entry"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Yorkshire Water Auth Options",
+        "description": "Current safe auth status: {auth_status}. Choose how to update or test authentication.",
+        "data": {
+          "auth_update_mode": "Auth update mode"
+        }
+      },
+      "token_json": {
+        "title": "Update Token Response JSON",
+        "description": "Paste a fresh full token response JSON from DevTools. Token values are stored only in the config entry and are redacted from logs.",
+        "data": {
+          "token_response_json": "Full token response JSON"
+        }
+      },
+      "raw_token": {
+        "title": "Update Raw Access Token",
+        "description": "Paste a fresh temporary access token.",
+        "data": {
+          "bearer_token": "Temporary access token"
+        }
+      },
+      "oauth": {
+        "title": "Experimental OAuth/PKCE Test",
+        "description": "Paste the callback URL or authorization code plus the matching PKCE code verifier. The offline access option is experimental and disabled by default.",
+        "data": {
+          "oauth_callback_url": "OAuth callback URL",
+          "oauth_authorization_code": "OAuth authorization code",
+          "oauth_code_verifier": "OAuth PKCE code verifier",
+          "oauth_request_offline_access": "Experimental: request offline access / refresh token"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Enter a valid access token",
+      "invalid_token_response": "Enter a valid token response JSON object",
+      "invalid_oauth": "Enter valid experimental OAuth callback/code details",
+      "offline_access_not_supported": "Yorkshire Water rejected the experimental offline access scope",
+      "id_token_supplied": "This looks like an ID token. Paste the access_token value instead.",
+      "token_expired": "The supplied token response is already expired",
+      "unknown": "Unexpected error occurred"
+    }
+  },
   "entity": {
     "sensor": {
       "yesterday_usage": {

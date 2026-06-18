@@ -87,12 +87,22 @@ def _load_config_flow_module():
         def __init_subclass__(cls, **kwargs):
             return super().__init_subclass__()
 
+    class OptionsFlow:
+        def async_show_form(self, **kwargs):
+            return {"type": "form", **kwargs}
+
+        def async_create_entry(self, **kwargs):
+            return {"type": "create_entry", **kwargs}
+
     config_entries.ConfigFlow = ConfigFlow
     config_entries.ConfigEntry = type("ConfigEntry", (), {})
+    config_entries.OptionsFlow = OptionsFlow
     data_entry_flow.FlowResult = dict
     aiohttp_client.async_get_clientsession = lambda hass: None
     voluptuous.Schema = lambda schema: schema
     voluptuous.Optional = lambda key, **kwargs: key
+    voluptuous.Required = lambda key, **kwargs: key
+    voluptuous.In = lambda values: values
 
     homeassistant.config_entries = config_entries
     sys.modules["homeassistant.config_entries"] = config_entries
@@ -197,6 +207,34 @@ class _FakeLogger:
         self.warning_messages.append(str(message))
 
 
+class _FakeConfigEntry:
+    def __init__(self) -> None:
+        self.entry_id = "entry-redacted"
+        self.data = {
+            "auth_type": "bearer_token",
+            "bearer_token": "TOKEN-REDACTED",
+            "token_expires_at": "2000-01-01T00:00:00+00:00",
+        }
+
+
+class _FakeConfigEntries:
+    def __init__(self) -> None:
+        self.updated_data = None
+        self.reloaded_entry_id = None
+
+    def async_update_entry(self, entry, *, data):
+        self.updated_data = data
+        entry.data = data
+
+    async def async_reload(self, entry_id):
+        self.reloaded_entry_id = entry_id
+
+
+class _FakeHass:
+    def __init__(self) -> None:
+        self.config_entries = _FakeConfigEntries()
+
+
 async def _main() -> None:
     api = _load_api_module()
     integration = _load_integration_module()
@@ -237,8 +275,48 @@ async def _main() -> None:
     config_flow_source = (
         ROOT / "custom_components/yorkshire_water/config_flow.py"
     ).read_text()
+    assert hasattr(config_flow.YorkshireWaterConfigFlow, "async_get_options_flow")
     assert "CONF_OAUTH_REQUEST_OFFLINE_ACCESS" in config_flow_source
     assert "default=False" in config_flow_source
+    assert "async_step_oauth" in config_flow_source
+    assert "async_step_raw_token" in config_flow_source
+    assert "async_step_token_json" in config_flow_source
+
+    fake_entry = _FakeConfigEntry()
+    options_flow = config_flow.YorkshireWaterConfigFlow.async_get_options_flow(fake_entry)
+    options_flow.hass = _FakeHass()
+    init_form = await options_flow.async_step_init()
+    assert "auth_update_mode" in init_form["data_schema"]
+    assert init_form["description_placeholders"]["auth_status"] == "token_expiry_known"
+    raw_form = await options_flow.async_step_raw_token()
+    assert "bearer_token" in raw_form["data_schema"]
+    assert "oauth_request_offline_access" not in raw_form["data_schema"]
+    token_json_form = await options_flow.async_step_token_json()
+    assert "token_response_json" in token_json_form["data_schema"]
+    assert "oauth_request_offline_access" not in token_json_form["data_schema"]
+    oauth_form = await options_flow.async_step_oauth()
+    assert "oauth_request_offline_access" in oauth_form["data_schema"]
+    token_json_options_result = await options_flow.async_step_token_json(
+        {
+            "token_response_json": json.dumps(
+                {
+                    "id_token": "TOKEN-REDACTED",
+                    "access_token": "TOKEN-REDACTED",
+                    "expires_in": 900,
+                    "token_type": "Bearer",
+                    "scope": "openid",
+                }
+            )
+        }
+    )
+    assert token_json_options_result["type"] == "create_entry"
+    assert options_flow.hass.config_entries.updated_data["bearer_token"] == "TOKEN-REDACTED"
+    assert (
+        options_flow.hass.config_entries.updated_data["token_expires_at"]
+        is not None
+    )
+    assert options_flow.hass.config_entries.reloaded_entry_id == "entry-redacted"
+    assert "oauth_request_offline_access" not in json.dumps(token_json_options_result)
     api.validate_oauth_state("STATE-REDACTED", "STATE-REDACTED")
     try:
         api.validate_oauth_state("STATE-REDACTED", "STATE-MISMATCH-REDACTED")
