@@ -309,7 +309,7 @@ class YorkshireWaterOptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
+        self._config_entry = config_entry
         self.context: dict[str, Any] = {}
 
     async def async_step_init(
@@ -330,7 +330,7 @@ class YorkshireWaterOptionsFlow(config_entries.OptionsFlow):
             step_id="init",
             data_schema=_auth_update_mode_schema(),
             description_placeholders={
-                "auth_status": _safe_auth_status(dict(self.config_entry.data)),
+                "auth_status": _safe_auth_status(dict(self._config_entry.data)),
             },
         )
 
@@ -455,7 +455,7 @@ class YorkshireWaterOptionsFlow(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Persist updated auth data and reload the entry."""
         data = {
-            **self.config_entry.data,
+            **self._config_entry.data,
             CONF_AUTH_TYPE: auth_type,
             CONF_BEARER_TOKEN: auth_data["access_token"],
             CONF_REFRESH_TOKEN: auth_data.get("refresh_token"),
@@ -465,10 +465,10 @@ class YorkshireWaterOptionsFlow(config_entries.OptionsFlow):
             data[CONF_OAUTH_REQUEST_OFFLINE_ACCESS] = request_offline_access
 
         self.hass.config_entries.async_update_entry(
-            self.config_entry,
+            self._config_entry,
             data=data,
         )
-        await self.hass.config_entries.async_reload(self.config_entry.entry_id)
+        await self.hass.config_entries.async_reload(self._config_entry.entry_id)
         return self.async_create_entry(title="", data={})
 
 

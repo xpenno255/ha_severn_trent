@@ -88,6 +88,10 @@ def _load_config_flow_module():
             return super().__init_subclass__()
 
     class OptionsFlow:
+        @property
+        def config_entry(self):
+            return None
+
         def async_show_form(self, **kwargs):
             return {"type": "form", **kwargs}
 
@@ -208,9 +212,9 @@ class _FakeLogger:
 
 
 class _FakeConfigEntry:
-    def __init__(self) -> None:
+    def __init__(self, data=None) -> None:
         self.entry_id = "entry-redacted"
-        self.data = {
+        self.data = data if data is not None else {
             "auth_type": "bearer_token",
             "bearer_token": "TOKEN-REDACTED",
             "token_expires_at": "2000-01-01T00:00:00+00:00",
@@ -281,9 +285,12 @@ async def _main() -> None:
     assert "async_step_oauth" in config_flow_source
     assert "async_step_raw_token" in config_flow_source
     assert "async_step_token_json" in config_flow_source
+    assert "self.config_entry =" not in config_flow_source
+    assert "self._config_entry = config_entry" in config_flow_source
 
     fake_entry = _FakeConfigEntry()
     options_flow = config_flow.YorkshireWaterConfigFlow.async_get_options_flow(fake_entry)
+    assert isinstance(options_flow, config_flow.YorkshireWaterOptionsFlow)
     options_flow.hass = _FakeHass()
     init_form = await options_flow.async_step_init()
     assert "auth_update_mode" in init_form["data_schema"]
@@ -317,6 +324,11 @@ async def _main() -> None:
     )
     assert options_flow.hass.config_entries.reloaded_entry_id == "entry-redacted"
     assert "oauth_request_offline_access" not in json.dumps(token_json_options_result)
+    missing_auth_entry = _FakeConfigEntry(data={})
+    missing_auth_options_flow = config_flow.YorkshireWaterOptionsFlow(missing_auth_entry)
+    missing_auth_options_flow.hass = _FakeHass()
+    missing_auth_form = await missing_auth_options_flow.async_step_init()
+    assert missing_auth_form["description_placeholders"]["auth_status"] == "auth_not_configured"
     api.validate_oauth_state("STATE-REDACTED", "STATE-REDACTED")
     try:
         api.validate_oauth_state("STATE-REDACTED", "STATE-MISMATCH-REDACTED")
