@@ -77,6 +77,7 @@
         "title": "Experimental OAuth/PKCE Callback",
         "description": "Open this authorization URL, log in to Yorkshire Water, then paste the final callback URL or authorization code below: {authorization_url}",
         "data": {
+          "authorization_url": "Authorization URL",
           "oauth_callback_url": "OAuth callback URL",
           "oauth_authorization_code": "OAuth authorization code"
         }

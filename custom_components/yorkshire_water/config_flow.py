@@ -40,6 +40,7 @@ from .const import (
     CONF_BEARER_TOKEN,
     CONF_METER_ID,
     CONF_METER_REFERENCE,
+    CONF_OAUTH_AUTHORIZATION_URL,
     CONF_OAUTH_AUTHORIZATION_CODE,
     CONF_OAUTH_CALLBACK_URL,
     CONF_OAUTH_CODE_VERIFIER,
@@ -490,6 +491,10 @@ class YorkshireWaterOptionsFlow(config_entries.OptionsFlow):
             step_id="oauth_callback",
             data_schema=vol.Schema(
                 {
+                    vol.Optional(
+                        CONF_OAUTH_AUTHORIZATION_URL,
+                        default=self._oauth_authorization_url or "",
+                    ): str,
                     vol.Optional(CONF_OAUTH_CALLBACK_URL): str,
                     vol.Optional(CONF_OAUTH_AUTHORIZATION_CODE): str,
                 }

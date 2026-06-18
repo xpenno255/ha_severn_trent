@@ -313,11 +313,13 @@ async def _main() -> None:
     )
     assert oauth_callback_form["step_id"] == "oauth_callback"
     assert "authorization_url" in oauth_callback_form["description_placeholders"]
+    assert oauth_callback_form["description_placeholders"]["authorization_url"]
     assert "offline_access" not in oauth_callback_form["description_placeholders"][
         "authorization_url"
     ]
     assert options_flow._oauth_code_verifier is not None
     assert options_flow._oauth_state is not None
+    assert "authorization_url" in oauth_callback_form["data_schema"]
     assert "oauth_callback_url" in oauth_callback_form["data_schema"]
     assert "oauth_authorization_code" in oauth_callback_form["data_schema"]
     assert "oauth_code_verifier" not in oauth_callback_form["data_schema"]
@@ -329,10 +331,26 @@ async def _main() -> None:
     assert "offline_access" in offline_callback_form["description_placeholders"][
         "authorization_url"
     ]
+    assert "authorization_url" in offline_callback_form["data_schema"]
     routed_oauth_form = await offline_options_flow.async_step_init(
         {"auth_update_mode": "oauth_pkce"}
     )
     assert routed_oauth_form["step_id"] == "oauth_start"
+    strings = json.loads(
+        (ROOT / "custom_components/yorkshire_water/strings.json").read_text()
+    )
+    translations = json.loads(
+        (ROOT / "custom_components/yorkshire_water/translations/en.json").read_text()
+    )
+    for translation_file in (strings, translations):
+        oauth_callback_translation = translation_file["options"]["step"][
+            "oauth_callback"
+        ]
+        assert "{authorization_url}" in oauth_callback_translation["description"]
+        assert (
+            oauth_callback_translation["data"]["authorization_url"]
+            == "Authorization URL"
+        )
     token_json_options_result = await options_flow.async_step_token_json(
         {
             "token_response_json": json.dumps(
