@@ -1,0 +1,154 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Yorkshire Water",
+        "description": "Beta development setup: paste either a temporary Yorkshire Water access token, the full token response JSON from DevTools, or experimental OAuth authorization-code details. Optional account and meter references can be supplied if known. Tokens, authorization codes, and code verifiers contain secrets; do not share them.",
+        "data": {
+          "bearer_token": "Temporary access token",
+          "token_response_json": "Full token response JSON",
+          "oauth_callback_url": "OAuth callback URL",
+          "oauth_authorization_code": "OAuth authorization code",
+          "oauth_code_verifier": "OAuth PKCE code verifier",
+          "oauth_request_offline_access": "Experimental: request offline access / refresh token",
+          "account_reference": "Account reference",
+          "meter_reference": "Meter reference"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Yorkshire Water",
+        "description": "Paste a fresh temporary Yorkshire Water access token, full token response JSON, or experimental OAuth authorization-code details.",
+        "data": {
+          "bearer_token": "Temporary access token",
+          "token_response_json": "Full token response JSON",
+          "oauth_callback_url": "OAuth callback URL",
+          "oauth_authorization_code": "OAuth authorization code",
+          "oauth_code_verifier": "OAuth PKCE code verifier",
+          "oauth_request_offline_access": "Experimental: request offline access / refresh token"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Enter a valid access token",
+      "invalid_token_response": "Enter a valid token response JSON object",
+      "invalid_oauth": "Enter valid experimental OAuth callback/code details",
+      "offline_access_not_supported": "Yorkshire Water rejected the experimental offline access scope",
+      "id_token_supplied": "This looks like an ID token. Paste the access_token value instead.",
+      "token_expired": "The supplied token response is already expired",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "This Yorkshire Water account or meter is already configured",
+      "reauth_successful": "Reauthentication was successful",
+      "unknown": "Unable to reauthenticate this entry"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Yorkshire Water Auth Options",
+        "description": "Current safe auth status: {auth_status}. Choose how to update or test authentication.",
+        "data": {
+          "auth_update_mode": "Auth update mode"
+        }
+      },
+      "token_json": {
+        "title": "Update Token Response JSON",
+        "description": "Paste a fresh full token response JSON from DevTools. Token values are stored only in the config entry and are redacted from logs.",
+        "data": {
+          "token_response_json": "Full token response JSON"
+        }
+      },
+      "raw_token": {
+        "title": "Update Raw Access Token",
+        "description": "Paste a fresh temporary access token.",
+        "data": {
+          "bearer_token": "Temporary access token"
+        }
+      },
+      "oauth_start": {
+        "title": "Experimental OAuth/PKCE Test",
+        "description": "Choose whether to request offline access. The integration will generate the PKCE verifier, state, challenge, and authorization URL for this flow.",
+        "data": {
+          "oauth_request_offline_access": "Experimental: request offline access / refresh token"
+        }
+      },
+      "oauth_callback": {
+        "title": "Experimental OAuth/PKCE Callback",
+        "description": "Open this authorization URL, log in to Yorkshire Water, then paste the final callback URL or authorization code below: {authorization_url}",
+        "data": {
+          "authorization_url": "Authorization URL",
+          "oauth_callback_url": "OAuth callback URL",
+          "oauth_authorization_code": "OAuth authorization code"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Enter a valid access token",
+      "invalid_token_response": "Enter a valid token response JSON object",
+      "invalid_oauth": "Enter valid experimental OAuth callback/code details",
+      "offline_access_not_supported": "Yorkshire Water rejected the experimental offline access scope",
+      "id_token_supplied": "This looks like an ID token. Paste the access_token value instead.",
+      "token_expired": "The supplied token response is already expired",
+      "unknown": "Unexpected error occurred"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "yesterday_usage": {
+        "name": "Yesterday Usage"
+      },
+      "today_usage": {
+        "name": "Today Usage"
+      },
+      "daily_average": {
+        "name": "7-Day Average"
+      },
+      "week_to_date": {
+        "name": "Week to Date"
+      },
+      "previous_week": {
+        "name": "Previous Week"
+      },
+      "month_to_date": {
+        "name": "Month to Date"
+      },
+      "year_to_date": {
+        "name": "Year to Date"
+      },
+      "meter_reading": {
+        "name": "Meter Reading"
+      },
+      "estimated_cumulative_usage": {
+        "name": "Estimated Cumulative Usage"
+      },
+      "yesterday_cost": {
+        "name": "Yesterday Cost"
+      },
+      "today_cost": {
+        "name": "Today Cost"
+      },
+      "week_to_date_cost": {
+        "name": "Week to Date Cost"
+      },
+      "previous_week_cost": {
+        "name": "Previous Week Cost"
+      },
+      "month_to_date_cost": {
+        "name": "Month to Date Cost"
+      },
+      "year_to_date_cost": {
+        "name": "Year to Date Cost"
+      },
+      "continuous_flow_alarm": {
+        "name": "Continuous Flow Alarm"
+      },
+      "data_latest_update_status": {
+        "name": "Data Latest Update Status"
+      },
+      "status": {
+        "name": "Status"
+      }
+    }
+  }
+}

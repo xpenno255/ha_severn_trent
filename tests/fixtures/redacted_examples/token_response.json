@@ -1,0 +1,8 @@
+{
+  "routeName": "token_response",
+  "id_token": "TOKEN-REDACTED",
+  "access_token": "TOKEN-REDACTED",
+  "expires_in": 900,
+  "token_type": "Bearer",
+  "scope": "openid user-names css-onlineaccount-api css-registration-api"
+}

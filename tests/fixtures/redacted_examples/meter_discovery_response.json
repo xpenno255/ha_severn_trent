@@ -1,0 +1,8 @@
+{
+  "routeName": "meter_details",
+  "accountReference": "ACCOUNT-REDACTED",
+  "meterReference": "METER-REDACTED",
+  "startDate": "2099-06-25T00:00:00",
+  "endDate": "0001-01-01T00:00:00",
+  "currentDate": "2099-06-17T00:00:00+00:00"
+}

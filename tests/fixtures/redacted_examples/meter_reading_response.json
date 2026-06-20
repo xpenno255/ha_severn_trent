@@ -1,0 +1,12 @@
+{
+  "routeName": "meter_reading_schema_pending",
+  "accountId": "ACCOUNT-REDACTED",
+  "meterId": "METER-REDACTED",
+  "meterReading": {
+    "reading": 123.456,
+    "unit": "m3",
+    "readingDate": "2099-01-15",
+    "estimated": false,
+    "source": "fake-fixture"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "routeName": "account_discovery_schema_pending",
+  "customer": {
+    "customerId": "CUSTOMER-REDACTED",
+    "displayName": "Fake Customer"
+  },
+  "accounts": [
+    {
+      "accountId": "ACCOUNT-REDACTED",
+      "accountNumber": "ACCOUNT-REDACTED",
+      "propertyId": "PROPERTY-REDACTED",
+      "supplyAddress": {
+        "line1": "REDACTED",
+        "town": "REDACTED",
+        "postcode": "REDACTED"
+      }
+    }
+  ]
+}

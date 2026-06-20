@@ -1,0 +1,14 @@
+{
+  "routeName": "account_summary",
+  "accountStartDate": "2099-06-25T00:00:00",
+  "accountEndDate": null,
+  "isClosed": false,
+  "isMetered": true,
+  "isReadyForReading": false,
+  "accountReference": "ACCOUNT-REDACTED",
+  "displayAccountReference": "ACCOUNT-REDACTED",
+  "accountStatus": "Live",
+  "address": {
+    "postcode": "POSTCODE-REDACTED"
+  }
+}

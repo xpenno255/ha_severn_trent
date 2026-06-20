@@ -1,0 +1,23 @@
+{
+  "routeName": "yearly_usage",
+  "monthlyConsumption": [
+    {
+      "month": "05",
+      "totalConsumptionLitres": "2994",
+      "standardTariffCleanWaterCost": 6.24,
+      "standardTariffSewerageCost": 7.6,
+      "estimatedDayCount": 0,
+      "missingDayCount": 0,
+      "totalCostIncludingSewerage": 13.84
+    },
+    {
+      "month": "06",
+      "totalConsumptionLitres": "2438",
+      "standardTariffCleanWaterCost": 5.08,
+      "standardTariffSewerageCost": 6.19,
+      "estimatedDayCount": 0,
+      "missingDayCount": 0,
+      "totalCostIncludingSewerage": 11.27
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+[
+  {
+    "month": "06",
+    "totalConsumptionLitres": "1000",
+    "standardTariffCleanWaterCost": 2.08,
+    "standardTariffSewerageCost": 2.54,
+    "estimatedDayCount": 0,
+    "missingDayCount": 0,
+    "totalCostIncludingSewerage": 4.62
+  }
+]

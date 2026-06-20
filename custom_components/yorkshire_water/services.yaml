@@ -1,0 +1,53 @@
+import_statistics:
+  name: Import historical usage statistics
+  description: Import historical Yorkshire Water usage into long-term statistics for the cumulative water sensor.
+  fields:
+    entity_id:
+      name: Entity
+      description: Cumulative water sensor statistic to import into.
+      required: false
+      default: sensor.yorkshire_water_estimated_cumulative_usage
+      selector:
+        entity:
+          domain: sensor
+    source:
+      name: Source
+      description: Historical data source to import from.
+      required: true
+      selector:
+        select:
+          options:
+            - api
+            - csv
+    start_date:
+      name: Start date
+      description: First date to request when source is api.
+      required: false
+      selector:
+        date:
+    end_date:
+      name: End date
+      description: Last date to request when source is api.
+      required: false
+      selector:
+        date:
+    file_path:
+      name: CSV file path
+      description: Local Home Assistant path to a Yorkshire Water CSV export when source is csv.
+      required: false
+      selector:
+        text:
+    dry_run:
+      name: Dry run
+      description: Return the parsed date range, totals, final cumulative value, and overlap status without writing statistics.
+      required: false
+      default: true
+      selector:
+        boolean:
+    allow_overwrite:
+      name: Allow overwrite
+      description: Allow the import to update existing statistics rows in the requested range.
+      required: false
+      default: false
+      selector:
+        boolean:

@@ -1,0 +1,11 @@
+{
+  "domain": "yorkshire_water",
+  "name": "Yorkshire Water",
+  "codeowners": ["@Crash-Evans"],
+  "config_flow": true,
+  "documentation": "https://github.com/Crash-Evans/ha_yorkshire_water",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}
