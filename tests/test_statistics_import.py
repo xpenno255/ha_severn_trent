@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date
+import asyncio
+from datetime import UTC, date, datetime
 import importlib.util
 from pathlib import Path
 import sys
@@ -109,6 +110,9 @@ class YorkshireWaterStatisticsImportTests(unittest.TestCase):
         self.assertEqual(report["base_cumulative_m3"], 10.0)
         self.assertEqual(report["final_cumulative_m3"], 10.126)
         self.assertFalse(report["existing_statistics_overlap"])
+        self.assertFalse(report["overlap_detected"])
+        self.assertIsNone(report["overlapping_start_date"])
+        self.assertIsNone(report["overlapping_end_date"])
 
     def test_rejects_malformed_csv_safely(self) -> None:
         with self.assertRaisesRegex(
@@ -134,17 +138,24 @@ class YorkshireWaterStatisticsImportTests(unittest.TestCase):
 
     def test_rejects_overlapping_import_unless_allowed(self) -> None:
         rows = statistics_import.parse_yorkshire_water_csv(CSV_SAMPLE)
-        overlap = [{"state": 1.0, "sum": 1.0}]
+        overlap = [
+            {
+                "start": datetime(2026, 6, 1, tzinfo=UTC),
+                "state": 1.0,
+                "sum": 1.0,
+            }
+        ]
 
         with self.assertRaisesRegex(
             statistics_import.YorkshireWaterStatisticsImportError,
-            "overlap",
-        ):
+            "overlapping_start_date=2026-06-01",
+        ) as err:
             statistics_import.build_import_statistics_plan(
                 rows,
                 timezone=ZoneInfo("Europe/London"),
                 overlapping_stats=overlap,
             )
+        self.assertNotIn("SECRET-SHOULD-NOT-APPEAR", str(err.exception))
 
         plan = statistics_import.build_import_statistics_plan(
             rows,
@@ -152,6 +163,55 @@ class YorkshireWaterStatisticsImportTests(unittest.TestCase):
             overlapping_stats=overlap,
             allow_overwrite=True,
         )
+        self.assertTrue(plan.existing_statistics_overlap)
+        self.assertEqual(plan.overlap_count, 1)
+        self.assertEqual(plan.overlap_start_date, date(2026, 6, 1))
+        self.assertEqual(plan.overlap_end_date, date(2026, 6, 1))
+
+    def test_dry_run_overlap_reports_details_without_failing(self) -> None:
+        rows = statistics_import.parse_yorkshire_water_csv(CSV_SAMPLE)
+        overlap = [
+            {"start": datetime(2026, 6, 1, tzinfo=UTC), "state": 1.0, "sum": 1.0},
+            {"start": datetime(2026, 6, 2, tzinfo=UTC), "state": 1.1, "sum": 1.1},
+        ]
+
+        plan = statistics_import.build_import_statistics_plan(
+            rows,
+            timezone=ZoneInfo("Europe/London"),
+            overlapping_stats=overlap,
+            block_overlap=False,
+        )
+        report = statistics_import.build_dry_run_report(
+            source="csv",
+            statistic_id="sensor.yorkshire_water_estimated_cumulative_usage",
+            plan=plan,
+        )
+
+        self.assertEqual(report["requested_import_start_date"], "2026-06-01")
+        self.assertEqual(report["requested_import_end_date"], "2026-06-02")
+        self.assertEqual(report["daily_rows_parsed"], 2)
+        self.assertEqual(report["total_litres"], 126.0)
+        self.assertEqual(report["final_cumulative_m3"], 0.126)
+        self.assertTrue(report["overlap_detected"])
+        self.assertEqual(report["overlapping_start_date"], "2026-06-01")
+        self.assertEqual(report["overlapping_end_date"], "2026-06-02")
+        self.assertEqual(report["overlapping_statistic_count"], 2)
+        self.assertTrue(report["allow_overwrite_would_allow_import"])
+
+    def test_real_import_with_overlap_and_allow_overwrite_true_builds_plan(self) -> None:
+        rows = statistics_import.parse_yorkshire_water_csv(CSV_SAMPLE)
+        overlap = [
+            {"start": datetime(2026, 6, 1, tzinfo=UTC), "state": 1.0, "sum": 1.0},
+        ]
+
+        plan = statistics_import.build_import_statistics_plan(
+            rows,
+            timezone=ZoneInfo("Europe/London"),
+            overlapping_stats=overlap,
+            allow_overwrite=True,
+        )
+
+        self.assertEqual(len(plan.statistics), 3)
         self.assertTrue(plan.existing_statistics_overlap)
         self.assertEqual(plan.overlap_count, 1)
 
@@ -165,6 +225,82 @@ class YorkshireWaterStatisticsImportTests(unittest.TestCase):
 
         self.assertEqual([row.litres for row in rows], [94.0, 32.0])
         self.assertEqual([row.cubic_metres for row in rows], [0.094, 0.032])
+
+    def test_dry_run_handler_reports_overlap_without_secret_logs(self) -> None:
+        _install_homeassistant_service_stubs()
+        rows = statistics_import.parse_yorkshire_water_csv(CSV_SAMPLE)
+        overlap = [
+            {"start": datetime(2026, 6, 1, tzinfo=UTC), "state": 1.0, "sum": 1.0},
+        ]
+        plan = statistics_import.build_import_statistics_plan(
+            rows,
+            timezone=ZoneInfo("Europe/London"),
+            overlapping_stats=overlap,
+            block_overlap=False,
+        )
+        logger = _FakeLogger()
+        hass = _FakeHass()
+        hass.data = {
+            "yorkshire_water": {
+                "statistics_import_logger": logger,
+            }
+        }
+        captured: dict[str, object] = {}
+
+        async def fake_load_daily_rows(hass, source, data):
+            captured["source"] = source
+            captured["file_path"] = data.get("file_path")
+            return rows
+
+        async def fake_prepare_import_plan(
+            hass,
+            statistic_id,
+            prepared_rows,
+            *,
+            allow_overwrite,
+            block_overlap=True,
+        ):
+            captured["allow_overwrite"] = allow_overwrite
+            captured["block_overlap"] = block_overlap
+            return plan
+
+        original_load = statistics_import._async_load_daily_rows
+        original_latest = statistics_import._latest_known_yorkshire_water_date
+        original_prepare = statistics_import._async_prepare_import_plan
+        try:
+            statistics_import._async_load_daily_rows = fake_load_daily_rows
+            statistics_import._latest_known_yorkshire_water_date = (
+                lambda hass, entity_id: date(2026, 6, 30)
+            )
+            statistics_import._async_prepare_import_plan = fake_prepare_import_plan
+            report = asyncio.run(
+                statistics_import.async_handle_import_statistics(
+                    hass,
+                    types.SimpleNamespace(
+                        data={
+                            "entity_id": (
+                                "sensor.yorkshire_water_estimated_cumulative_usage"
+                            ),
+                            "source": "csv",
+                            "file_path": "/config/yorkshire_water/SECRET.csv",
+                            "dry_run": True,
+                            "allow_overwrite": False,
+                        }
+                    ),
+                )
+            )
+        finally:
+            statistics_import._async_load_daily_rows = original_load
+            statistics_import._latest_known_yorkshire_water_date = original_latest
+            statistics_import._async_prepare_import_plan = original_prepare
+
+        self.assertIs(captured["block_overlap"], False)
+        self.assertTrue(report["overlap_detected"])
+        self.assertEqual(report["overlapping_start_date"], "2026-06-01")
+        self.assertEqual(report["imported_statistics_rows"], 0)
+        log_text = " ".join(logger.messages)
+        self.assertNotIn("/config/yorkshire_water/SECRET.csv", log_text)
+        self.assertNotIn("SECRET", log_text)
 
 
 class YorkshireWaterServiceRegistrationTests(unittest.TestCase):
@@ -317,6 +453,14 @@ class _FakeHass:
     def __init__(self) -> None:
         self.data = {}
         self.services = _FakeServices()
+
+
+class _FakeLogger:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def info(self, message, *args) -> None:
+        self.messages.append(str(message) % args)
 
 
 def _install_homeassistant_service_stubs() -> None:

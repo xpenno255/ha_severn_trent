@@ -65,6 +65,8 @@ class ImportStatisticsPlan:
     final_sum_m3: float
     existing_statistics_overlap: bool
     overlap_count: int
+    overlap_start_date: date | None
+    overlap_end_date: date | None
     base_strategy: str
 
 
@@ -240,13 +242,21 @@ def build_import_statistics_plan(
     prior_stats: list[dict[str, Any]] | None = None,
     overlapping_stats: list[dict[str, Any]] | None = None,
     allow_overwrite: bool = False,
+    block_overlap: bool = True,
 ) -> ImportStatisticsPlan:
     """Build an import plan from source rows and existing recorder statistics."""
     prior_stats = prior_stats or []
     overlapping_stats = overlapping_stats or []
-    if overlapping_stats and not allow_overwrite:
+    overlap_start, overlap_end = _overlap_date_range(overlapping_stats)
+    if overlapping_stats and block_overlap and not allow_overwrite:
         raise YorkshireWaterStatisticsImportError(
-            "Existing statistics overlap the requested import range"
+            _overlap_error_message(
+                requested_start=rows[0].day,
+                requested_end=rows[-1].day,
+                overlap_count=len(overlapping_stats),
+                overlap_start=overlap_start,
+                overlap_end=overlap_end,
+            )
         )
 
     base_cumulative_m3 = 0.0
@@ -274,6 +284,8 @@ def build_import_statistics_plan(
         final_sum_m3=float(statistics[-1]["sum"]),
         existing_statistics_overlap=bool(overlapping_stats),
         overlap_count=len(overlapping_stats),
+        overlap_start_date=overlap_start,
+        overlap_end_date=overlap_end,
         base_strategy=base_strategy,
     )
 
@@ -290,6 +302,8 @@ def build_dry_run_report(
     return {
         "source": source,
         "statistic_id": statistic_id,
+        "requested_import_start_date": rows[0].day.isoformat(),
+        "requested_import_end_date": rows[-1].day.isoformat(),
         "daily_rows_parsed": len(rows),
         "statistics_rows_prepared": len(plan.statistics),
         "earliest_date": rows[0].day.isoformat(),
@@ -299,7 +313,16 @@ def build_dry_run_report(
         "base_cumulative_m3": round(plan.base_cumulative_m3, 6),
         "final_cumulative_m3": round(plan.final_cumulative_m3, 6),
         "existing_statistics_overlap": plan.existing_statistics_overlap,
+        "overlap_detected": plan.existing_statistics_overlap,
         "overlap_count": plan.overlap_count,
+        "overlapping_start_date": plan.overlap_start_date.isoformat()
+        if plan.overlap_start_date
+        else None,
+        "overlapping_end_date": plan.overlap_end_date.isoformat()
+        if plan.overlap_end_date
+        else None,
+        "overlapping_statistic_count": plan.overlap_count,
+        "allow_overwrite_would_allow_import": plan.existing_statistics_overlap,
         "base_strategy": plan.base_strategy,
     }
 
@@ -362,6 +385,7 @@ async def async_handle_import_statistics(
             entity_id,
             rows,
             allow_overwrite=allow_overwrite,
+            block_overlap=not dry_run,
         )
         report = build_dry_run_report(
             source=source,
@@ -374,9 +398,20 @@ async def async_handle_import_statistics(
             report["imported_statistics_rows"] = 0
             _safe_import_log(
                 hass,
-                "Yorkshire Water statistics dry run complete: rows=%s overlap=%s",
+                (
+                    "Yorkshire Water statistics dry run complete: "
+                    "rows=%s total_litres=%s final_cumulative_m3=%s "
+                    "overlap=%s overlap_start=%s overlap_end=%s overlap_count=%s "
+                    "allow_overwrite_would_allow_import=%s"
+                ),
                 len(rows),
+                report["total_litres"],
+                report["final_cumulative_m3"],
                 plan.existing_statistics_overlap,
+                report["overlapping_start_date"],
+                report["overlapping_end_date"],
+                plan.overlap_count,
+                report["allow_overwrite_would_allow_import"],
             )
             return report
 
@@ -478,6 +513,7 @@ async def _async_prepare_import_plan(
     rows: list[DailyUsageRow],
     *,
     allow_overwrite: bool,
+    block_overlap: bool = True,
 ) -> ImportStatisticsPlan:
     """Prepare validated cumulative statistics rows."""
     from homeassistant.util import dt as dt_util
@@ -492,14 +528,6 @@ async def _async_prepare_import_plan(
         base_start,
         import_end,
     )
-    if overlapping_stats and not allow_overwrite:
-        raise YorkshireWaterStatisticsImportError(
-            "Existing statistics overlap the requested import range"
-        )
-
-    base_cumulative_m3 = 0.0
-    base_sum_m3 = 0.0
-    base_strategy = "started_from_zero"
     if prior_stats:
         prior = prior_stats[-1]
         prior_start = prior.get("start")
@@ -513,6 +541,7 @@ async def _async_prepare_import_plan(
             prior_stats=prior_stats,
             overlapping_stats=overlapping_stats,
             allow_overwrite=allow_overwrite,
+            block_overlap=block_overlap,
         )
         return ImportStatisticsPlan(
             daily_rows=plan.daily_rows,
@@ -523,6 +552,8 @@ async def _async_prepare_import_plan(
             final_sum_m3=plan.final_sum_m3,
             existing_statistics_overlap=plan.existing_statistics_overlap,
             overlap_count=plan.overlap_count,
+            overlap_start_date=plan.overlap_start_date,
+            overlap_end_date=plan.overlap_end_date,
             base_strategy=f"continued_from_prior_statistic_at_{prior_start_text}",
         )
 
@@ -532,6 +563,7 @@ async def _async_prepare_import_plan(
         prior_stats=prior_stats,
         overlapping_stats=overlapping_stats,
         allow_overwrite=allow_overwrite,
+        block_overlap=block_overlap,
     )
 
 
@@ -664,6 +696,62 @@ def _validate_statistics_rows(rows: list[dict[str, Any]]) -> None:
         previous_start = start
         previous_state = state
         previous_sum = total
+
+
+def _overlap_date_range(
+    overlapping_stats: list[dict[str, Any]],
+) -> tuple[date | None, date | None]:
+    """Return the safe date range for overlapping statistics."""
+    dates = [
+        stat_date
+        for stat in overlapping_stats
+        if (stat_date := _statistic_start_date(stat)) is not None
+    ]
+    if not dates:
+        return None, None
+    return min(dates), max(dates)
+
+
+def _statistic_start_date(stat: dict[str, Any]) -> date | None:
+    """Extract a date from a Home Assistant statistics row."""
+    value = stat.get("start")
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, tz=UTC).date()
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError:
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+            except ValueError:
+                return None
+    return None
+
+
+def _overlap_error_message(
+    *,
+    requested_start: date,
+    requested_end: date,
+    overlap_count: int,
+    overlap_start: date | None,
+    overlap_end: date | None,
+) -> str:
+    """Build a safe overlap error message without identifiers or secrets."""
+    return (
+        "Existing statistics overlap the requested import range "
+        f"{requested_start.isoformat()} to {requested_end.isoformat()}; "
+        f"overlapping_start_date={overlap_start.isoformat() if overlap_start else 'unknown'}; "
+        f"overlapping_end_date={overlap_end.isoformat() if overlap_end else 'unknown'}; "
+        f"overlapping_statistic_count={overlap_count}. "
+        "Run with dry_run: true to review the overlap, then use "
+        "allow_overwrite: true only if you intend to update matching statistics rows."
+    )
 
 
 def _parse_csv_month(rows: list[list[str]]) -> date:

@@ -71,7 +71,7 @@ data:
   dry_run: true
 ```
 
-If the dry-run totals and overlap status look correct, run the same service with `dry_run: false`. Set `allow_overwrite: true` only when you intentionally want to replace existing statistics rows in the same date range.
+If the dry-run totals and overlap status look correct, run the same service with `dry_run: false`. Set `allow_overwrite: true` only when you intentionally want Home Assistant's recorder import to update matching statistic rows in the same date range. The service does not purge the whole date range; it imports the prepared cumulative rows and lets the recorder update rows with the same statistic start timestamp while leaving other existing rows alone.
 
 The CSV parser reads the `Time Period:` month/year header, imports daily `Date,Litres` rows, ignores the `Total` row for daily statistics, and validates that the total litres match the daily rows. Costs are parsed opportunistically for future cost-statistics support, but cost parsing does not block water usage import.
 
@@ -105,6 +105,8 @@ After copying a new `services.yaml` into Home Assistant, fully restart Home Assi
 The action appears in Developer Tools -> Actions as Yorkshire Water import statistics. If it does not appear, confirm the Yorkshire Water integration is loaded and restart Home Assistant rather than only reloading YAML.
 
 For CSV imports, `file_path` must be readable from inside Home Assistant. For example, a file copied to the Home Assistant config share as `yorkshire_water/June 2026.csv` should be referenced as `/config/yorkshire_water/June 2026.csv`.
+
+Home Assistant may already have created long-term statistics for the live cumulative sensor, so a CSV import can overlap existing statistics. Run a dry run first. If overlap is detected, review the reported requested and overlapping date ranges before using `allow_overwrite: true`.
 
 ## Cost Tracking
 
