@@ -34,6 +34,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_HOURS,
     DOMAIN,
 )
+from .statistics_import import async_setup_services, async_unload_services
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -171,6 +172,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "api": api,
         "coordinator": coordinator,
     }
+    await async_setup_services(hass)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -181,5 +183,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
+        if not any(
+            isinstance(value, dict) and "api" in value
+            for value in hass.data[DOMAIN].values()
+        ):
+            await async_unload_services(hass)
 
     return unload_ok

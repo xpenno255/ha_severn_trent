@@ -4,6 +4,10 @@ from __future__ import annotations
 
 DOMAIN = "yorkshire_water"
 
+DEFAULT_CUMULATIVE_USAGE_ENTITY_ID = (
+    "sensor.yorkshire_water_estimated_cumulative_usage"
+)
+
 CONF_ACCOUNT_ID = "account_id"
 CONF_ACCOUNT_REFERENCE = "account_reference"
 CONF_AUTH_TYPE = "auth_type"

@@ -51,6 +51,53 @@ Use `sensor.yorkshire_water_estimated_cumulative_usage` for Energy Dashboard wat
 
 To add it, open Settings -> Dashboards -> Energy -> Water consumption, then select Estimated Cumulative Usage.
 
+## Importing historical usage
+
+Home Assistant does not automatically backfill old Energy Dashboard water usage from the current sensor state. Yorkshire Water provides an `import_statistics` service to import historical usage into long-term statistics for `sensor.yorkshire_water_estimated_cumulative_usage`.
+
+This service imports statistics for the cumulative m³ water sensor only. It does not import history for Yesterday Usage, Week to Date, Month to Date, Year to Date, or other period sensors.
+
+Always run a dry run first. Dry runs are the default and return the number of daily rows parsed, earliest and latest dates, total litres, final cumulative m³, and whether existing statistics overlap the requested range.
+
+### CSV export import
+
+Export the monthly CSV from Yorkshire Water, place it somewhere Home Assistant can read, then call:
+
+```yaml
+service: yorkshire_water.import_statistics
+data:
+  source: csv
+  file_path: /config/yorkshire-water/june-2026.csv
+  dry_run: true
+```
+
+If the dry-run totals and overlap status look correct, run the same service with `dry_run: false`. Set `allow_overwrite: true` only when you intentionally want to replace existing statistics rows in the same date range.
+
+The CSV parser reads the `Time Period:` month/year header, imports daily `Date,Litres` rows, ignores the `Total` row for daily statistics, and validates that the total litres match the daily rows. Costs are parsed opportunistically for future cost-statistics support, but cost parsing does not block water usage import.
+
+### API date-range import
+
+For historical data still available from the Yorkshire Water daily-consumption endpoint, call:
+
+```yaml
+service: yorkshire_water.import_statistics
+data:
+  source: api
+  start_date: "2026-06-01"
+  end_date: "2026-06-30"
+  dry_run: true
+```
+
+The API import uses the configured Yorkshire Water account and meter references. It converts daily litres to cumulative m³ statistics in chronological order.
+
+### Cumulative base strategy
+
+When importing a partial month or an older date range, the integration continues from the last prior statistic for the cumulative sensor if one exists. If no prior statistic exists, it starts the first imported boundary row at `0` m³ and then increases by each imported daily usage amount.
+
+Statistics rows are written at local day boundaries so the Energy Dashboard can calculate daily consumption from cumulative increases. Today and future dates are rejected because historical imports should contain complete daily usage only.
+
+After an import, the Energy Dashboard may need the next Home Assistant statistics cycle before history appears. If imported history does not show as expected, check Developer Tools -> Statistics for issues with `sensor.yorkshire_water_estimated_cumulative_usage`.
+
 ## Cost Tracking
 
 Cost sensors are separate from the Energy Dashboard water usage sensor. Home Assistant's Energy Dashboard should use the cumulative water sensor in m³, while the cost sensors are normal monetary sensors in GBP for Lovelace cards, reports, and dashboards.
@@ -84,7 +131,9 @@ config/
         ├── config_flow.py
         ├── const.py
         ├── manifest.json
+        ├── services.yaml
         ├── sensor.py
+        ├── statistics_import.py
         └── strings.json
 ```
 
