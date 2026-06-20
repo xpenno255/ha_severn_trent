@@ -98,6 +98,14 @@ Statistics rows are written at local day boundaries so the Energy Dashboard can 
 
 After an import, the Energy Dashboard may need the next Home Assistant statistics cycle before history appears. If imported history does not show as expected, check Developer Tools -> Statistics for issues with `sensor.yorkshire_water_estimated_cumulative_usage`.
 
+### Troubleshooting the import action
+
+After copying a new `services.yaml` into Home Assistant, fully restart Home Assistant so the service metadata and integration code are loaded together.
+
+The action appears in Developer Tools -> Actions as Yorkshire Water import statistics. If it does not appear, confirm the Yorkshire Water integration is loaded and restart Home Assistant rather than only reloading YAML.
+
+For CSV imports, `file_path` must be readable from inside Home Assistant. For example, a file copied to the Home Assistant config share as `yorkshire_water/June 2026.csv` should be referenced as `/config/yorkshire_water/June 2026.csv`.
+
 ## Cost Tracking
 
 Cost sensors are separate from the Energy Dashboard water usage sensor. Home Assistant's Energy Dashboard should use the cumulative water sensor in m³, while the cost sensors are normal monetary sensors in GBP for Lovelace cards, reports, and dashboards.

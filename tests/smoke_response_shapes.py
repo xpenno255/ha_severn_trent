@@ -49,6 +49,7 @@ def _load_integration_module():
     config_entries.ConfigEntry = type("ConfigEntry", (), {})
     const.Platform = types.SimpleNamespace(SENSOR="sensor")
     core.HomeAssistant = type("HomeAssistant", (), {})
+    core.SupportsResponse = types.SimpleNamespace(ONLY="only")
     exceptions.ConfigEntryAuthFailed = type("ConfigEntryAuthFailed", (Exception,), {})
     aiohttp_client.async_get_clientsession = lambda hass: None
     update_coordinator.DataUpdateCoordinator = type("DataUpdateCoordinator", (), {})

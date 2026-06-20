@@ -8,7 +8,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -34,11 +34,17 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_HOURS,
     DOMAIN,
 )
-from .statistics_import import async_setup_services, async_unload_services
+from .statistics_import import (
+    SERVICE_IMPORT_STATISTICS,
+    async_handle_import_statistics,
+    build_import_statistics_service_schema,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
+
+DATA_IMPORT_STATISTICS_SERVICE_REGISTERED = "import_statistics_service_registered"
 
 
 async def async_start_reauth_safely(
@@ -162,31 +168,66 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         update_interval=timedelta(hours=DEFAULT_SCAN_INTERVAL_HOURS),
     )
 
-    # Avoid blocking setup while the Yorkshire Water endpoint contract is still
-    # being discovered; sensors will show unavailable with a clear coordinator
-    # error until the API layer is completed.
-    await coordinator.async_refresh()
-
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
         "api": api,
         "coordinator": coordinator,
     }
-    await async_setup_services(hass)
+    async_register_import_statistics_service(hass)
+
+    # Avoid blocking setup while the Yorkshire Water endpoint contract is still
+    # being discovered; sensors will show unavailable with a clear coordinator
+    # error until the API layer is completed.
+    await coordinator.async_refresh()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+def async_register_import_statistics_service(hass: HomeAssistant) -> None:
+    """Register the Yorkshire Water historical statistics import service once."""
+    hass.data.setdefault(DOMAIN, {})
+    if hass.data[DOMAIN].get(DATA_IMPORT_STATISTICS_SERVICE_REGISTERED):
+        return
+
+    hass.data[DOMAIN]["statistics_import_logger"] = _LOGGER
+
+    async def async_service_handler(call) -> dict:
+        """Handle the import_statistics service call."""
+        return await async_handle_import_statistics(hass, call)
+
+    hass.services.async_register(
+        DOMAIN,
+        "import_statistics",
+        async_service_handler,
+        schema=build_import_statistics_service_schema(),
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.data[DOMAIN][DATA_IMPORT_STATISTICS_SERVICE_REGISTERED] = True
+    _LOGGER.info("Registered Yorkshire Water import_statistics service")
+
+
+def async_unregister_import_statistics_service(hass: HomeAssistant) -> None:
+    """Unregister the Yorkshire Water historical statistics import service."""
+    if not hass.data.get(DOMAIN, {}).pop(
+        DATA_IMPORT_STATISTICS_SERVICE_REGISTERED,
+        False,
+    ):
+        return
+    hass.data[DOMAIN].pop("statistics_import_logger", None)
+    hass.services.async_remove(DOMAIN, SERVICE_IMPORT_STATISTICS)
+    _LOGGER.info("Unregistered Yorkshire Water import_statistics service")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        hass.data[DOMAIN].pop(entry.entry_id, None)
         if not any(
             isinstance(value, dict) and "api" in value
             for value in hass.data[DOMAIN].values()
         ):
-            await async_unload_services(hass)
+            async_unregister_import_statistics_service(hass)
 
     return unload_ok

@@ -304,18 +304,13 @@ def build_dry_run_report(
     }
 
 
-async def async_setup_services(hass: Any) -> None:
-    """Register Yorkshire Water historical statistics services."""
-    if hass.data.setdefault(DOMAIN, {}).get("statistics_services_registered"):
-        return
-
+def build_import_statistics_service_schema() -> Any:
+    """Build the Home Assistant schema for the import_statistics service."""
     from homeassistant.const import CONF_ENTITY_ID as HA_CONF_ENTITY_ID
-    from homeassistant.core import SupportsResponse
-    from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
     import homeassistant.helpers.config_validation as cv
     import voluptuous as vol
 
-    schema = vol.Schema(
+    return vol.Schema(
         {
             vol.Optional(
                 HA_CONF_ENTITY_ID,
@@ -330,61 +325,85 @@ async def async_setup_services(hass: Any) -> None:
         }
     )
 
-    async def async_handle_import_statistics(call: Any) -> dict[str, Any]:
-        data = dict(call.data)
-        entity_id = data.get(HA_CONF_ENTITY_ID, DEFAULT_CUMULATIVE_USAGE_ENTITY_ID)
-        source = data[CONF_SOURCE]
-        dry_run = data.get(CONF_DRY_RUN, True)
-        allow_overwrite = data.get(CONF_ALLOW_OVERWRITE, False)
 
-        try:
-            rows = await _async_load_daily_rows(hass, source, data)
-            latest_known_date = _latest_known_yorkshire_water_date(hass, entity_id)
-            validate_daily_rows(rows, latest_known_date=latest_known_date)
-            plan = await _async_prepare_import_plan(
-                hass,
-                entity_id,
-                rows,
-                allow_overwrite=allow_overwrite,
-            )
-            report = build_dry_run_report(
-                source=source,
-                statistic_id=entity_id,
-                plan=plan,
-            )
-            report["dry_run"] = dry_run
-            report["allow_overwrite"] = allow_overwrite
-            if dry_run:
-                report["imported_statistics_rows"] = 0
-                return report
+async def async_handle_import_statistics(
+    hass: Any,
+    call: Any,
+) -> dict[str, Any]:
+    """Handle the Yorkshire Water historical statistics import service."""
+    from homeassistant.const import CONF_ENTITY_ID as HA_CONF_ENTITY_ID
+    from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
-            await _async_import_statistics_rows(hass, entity_id, plan.statistics)
-            report["imported_statistics_rows"] = len(plan.statistics)
-            return report
-        except YorkshireWaterStatisticsImportError as err:
-            raise ServiceValidationError(str(err)) from err
-        except YorkshireWaterEndpointNotConfiguredError as err:
-            raise ServiceValidationError(str(err)) from err
-        except YorkshireWaterSchemaError as err:
-            raise ServiceValidationError(str(err)) from err
-        except HomeAssistantError:
-            raise
+    data = dict(call.data)
+    entity_id = data.get(HA_CONF_ENTITY_ID, DEFAULT_CUMULATIVE_USAGE_ENTITY_ID)
+    source = data[CONF_SOURCE]
+    dry_run = data.get(CONF_DRY_RUN, True)
+    allow_overwrite = data.get(CONF_ALLOW_OVERWRITE, False)
 
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_IMPORT_STATISTICS,
-        async_handle_import_statistics,
-        schema=schema,
-        supports_response=SupportsResponse.ONLY,
+    _safe_import_log(
+        hass,
+        "Yorkshire Water statistics import started: source=%s dry_run=%s allow_overwrite=%s",
+        source,
+        dry_run,
+        allow_overwrite,
     )
-    hass.data[DOMAIN]["statistics_services_registered"] = True
+
+    try:
+        rows = await _async_load_daily_rows(hass, source, data)
+        _safe_import_log(
+            hass,
+            "Yorkshire Water statistics import parsed rows: count=%s",
+            len(rows),
+        )
+        latest_known_date = _latest_known_yorkshire_water_date(hass, entity_id)
+        validate_daily_rows(rows, latest_known_date=latest_known_date)
+        plan = await _async_prepare_import_plan(
+            hass,
+            entity_id,
+            rows,
+            allow_overwrite=allow_overwrite,
+        )
+        report = build_dry_run_report(
+            source=source,
+            statistic_id=entity_id,
+            plan=plan,
+        )
+        report["dry_run"] = dry_run
+        report["allow_overwrite"] = allow_overwrite
+        if dry_run:
+            report["imported_statistics_rows"] = 0
+            _safe_import_log(
+                hass,
+                "Yorkshire Water statistics dry run complete: rows=%s overlap=%s",
+                len(rows),
+                plan.existing_statistics_overlap,
+            )
+            return report
+
+        await _async_import_statistics_rows(hass, entity_id, plan.statistics)
+        report["imported_statistics_rows"] = len(plan.statistics)
+        _safe_import_log(
+            hass,
+            "Yorkshire Water statistics import complete: daily_rows=%s statistics_rows=%s",
+            len(rows),
+            len(plan.statistics),
+        )
+        return report
+    except YorkshireWaterStatisticsImportError as err:
+        raise ServiceValidationError(str(err)) from err
+    except YorkshireWaterEndpointNotConfiguredError as err:
+        raise ServiceValidationError(str(err)) from err
+    except YorkshireWaterSchemaError as err:
+        raise ServiceValidationError(str(err)) from err
+    except HomeAssistantError:
+        raise
 
 
-async def async_unload_services(hass: Any) -> None:
-    """Unload Yorkshire Water historical statistics services."""
-    if not hass.data.get(DOMAIN, {}).pop("statistics_services_registered", False):
-        return
-    hass.services.async_remove(DOMAIN, SERVICE_IMPORT_STATISTICS)
+def _safe_import_log(hass: Any, message: str, *args: Any) -> None:
+    """Log import progress without sensitive identifiers."""
+    logger = hass.data.get(DOMAIN, {}).get("statistics_import_logger")
+    if logger is not None:
+        logger.info(message, *args)
 
 
 async def _async_load_daily_rows(
