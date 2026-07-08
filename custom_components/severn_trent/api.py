@@ -4,10 +4,25 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import requests
+
+
+def _api_dt(dt: datetime) -> str:
+    """Format a datetime for the Kraken GraphQL API.
+
+    The API expects ISO 8601 with a timezone indicator.
+    Avoid double-encoding: if the datetime is timezone-aware,
+    .isoformat() already includes '+00:00', so don't append 'Z'.
+    """
+    if dt.tzinfo is not None:
+        # Timezone-aware: replace +00:00 suffix with Z for clean format
+        return dt.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+    # Naive datetime: assume UTC and append Z
+    return dt.isoformat() + "Z"
+
 
 from .const import (
     API_KEY_MUTATION,
@@ -48,8 +63,15 @@ class SevernTrentAPI:
         self.token = None
         self.refresh_token = None
         self.token_expires_at = 0
-        self.session = requests.Session()
+        self._session: requests.Session | None = None
         self.meter_identifiers_fetched = False
+
+    @property
+    def session(self) -> requests.Session:
+        """Lazy-initialise the requests session to avoid blocking the event loop."""
+        if self._session is None:
+            self._session = requests.Session()
+        return self._session
 
     @staticmethod
     def _normalize_browser_token(browser_token: str) -> str:
@@ -299,10 +321,10 @@ class SevernTrentAPI:
 
             # Get data for current week and previous complete week
             # Need to fetch enough to cover: yesterday, 7-day average, current week, AND previous week
-            end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            end_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
             # Calculate how many days back to the start of previous week (Monday)
-            today = datetime.now().date()
+            today = datetime.now(timezone.utc).date()
             days_since_monday = today.weekday()  # 0 = Monday, 6 = Sunday
             current_week_monday = today - timedelta(days=days_since_monday)
             previous_week_monday = current_week_monday - timedelta(days=7)
@@ -324,8 +346,8 @@ class SevernTrentAPI:
                     "query": SMART_METER_READINGS_QUERY,
                     "variables": {
                         "accountNumber": self.account_number,
-                        "startAt": start_date.isoformat() + "Z",
-                        "endAt": end_date.isoformat() + "Z",
+                        "startAt": _api_dt(start_date),
+                        "endAt": _api_dt(end_date),
                         "utilityFilters": [{
                             "waterFilters": {
                                 "readingFrequencyType": "DAY_INTERVAL",
@@ -349,12 +371,17 @@ class SevernTrentAPI:
             if measurements is None:
                 _LOGGER.error("Unexpected daily readings response structure")
                 _LOGGER.debug("Daily readings response keys: %s", list(daily_data.keys()))
+                # Log the actual response for debugging (truncated)
+                _LOGGER.debug("Daily readings response: %s", json.dumps(daily_data, indent=2)[:1000])
                 return {}
 
             # Some accounts/meters appear to return 0 edges for DAY_INTERVAL; try an alternate enum.
-            if not measurements:
+            # Only retry for smart meter types (AMI/AMR) — VISUAL/MANUAL meters don't support daily aggregation.
+            if not measurements and self.capability_type not in ("VISUAL", "MANUAL"):
                 _LOGGER.warning(
-                    "No daily measurements returned for DAY_INTERVAL; retrying with readingFrequencyType=DAY"
+                    "No daily measurements returned for DAY_INTERVAL (MSPID=%s, DeviceID=%s); "
+                    "retrying with readingFrequencyType=DAILY",
+                    self.market_supply_point_id, self.device_id,
                 )
                 daily_retry = self.session.post(
                     API_URL,
@@ -363,12 +390,12 @@ class SevernTrentAPI:
                         "query": SMART_METER_READINGS_QUERY,
                         "variables": {
                             "accountNumber": self.account_number,
-                            "startAt": start_date.isoformat() + "Z",
-                            "endAt": end_date.isoformat() + "Z",
+                            "startAt": _api_dt(start_date),
+                            "endAt": _api_dt(end_date),
                             "utilityFilters": [
                                 {
                                     "waterFilters": {
-                                        "readingFrequencyType": "DAY",
+                                        "readingFrequencyType": "DAILY",
                                         "marketSupplyPointId": self.market_supply_point_id,
                                         "deviceId": self.device_id,
                                     }
@@ -389,6 +416,12 @@ class SevernTrentAPI:
                     retry_measurements = _extract_measurements(daily_data)
                     if retry_measurements is not None:
                         measurements = retry_measurements
+            elif not measurements:
+                _LOGGER.info(
+                    "No daily measurements for %s meter (MSPID=%s, DeviceID=%s); "
+                    "skipping DAILY retry as this meter type does not support daily aggregation",
+                    self.capability_type, self.market_supply_point_id, self.device_id,
+                )
             
             # Fetch monthly readings (last 12 months for estimation calculations)
             monthly_start = end_date - timedelta(days=365)
@@ -401,8 +434,8 @@ class SevernTrentAPI:
                     "query": SMART_METER_READINGS_QUERY,
                     "variables": {
                         "accountNumber": self.account_number,
-                        "startAt": monthly_start.isoformat() + "Z",
-                        "endAt": end_date.isoformat() + "Z",
+                        "startAt": _api_dt(monthly_start),
+                        "endAt": _api_dt(end_date),
                         "utilityFilters": [{
                             "waterFilters": {
                                 "readingFrequencyType": "MONTH_INTERVAL",
@@ -456,7 +489,13 @@ class SevernTrentAPI:
             _LOGGER.info("Found %d monthly readings (after deduplication)", len(monthly_readings))
 
             if not measurements:
-                _LOGGER.warning("No daily measurements found; returning monthly-only payload")
+                _LOGGER.warning(
+                    "No daily measurements found for account %s (MSPID=%s, DeviceID=%s, "
+                    "capabilityType=%s); returning monthly-only payload. "
+                    "This usually means the meter does not have smart/daily readings available.",
+                    self.account_number, self.market_supply_point_id,
+                    self.device_id, self.capability_type,
+                )
                 return {
                     "meter_id": f"{self.market_supply_point_id}_{self.device_id}",
                     "yesterday_usage": None,
@@ -501,7 +540,7 @@ class SevernTrentAPI:
                 return {}
 
             # Calculate yesterday's date (today - 1 day) to match website behavior
-            yesterday = (datetime.now().date() - timedelta(days=1)).isoformat()
+            yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
 
             # Get yesterday's total from the specific date
             yesterday_total = daily_totals.get(yesterday, 0.0)
@@ -557,8 +596,8 @@ class SevernTrentAPI:
                                 "query": SMART_METER_READINGS_QUERY,
                                 "variables": {
                                     "accountNumber": self.account_number,
-                                    "startAt": official_dt.isoformat() + "Z",
-                                    "endAt": partial_month_end.isoformat() + "Z",
+                                    "startAt": _api_dt(official_dt),
+                                    "endAt": _api_dt(partial_month_end),
                                     "utilityFilters": [{
                                         "waterFilters": {
                                             "readingFrequencyType": "DAY_INTERVAL",
@@ -610,7 +649,7 @@ class SevernTrentAPI:
             previous_week_end_date = None
             days_in_current_week = 0
 
-            today = datetime.now().date()
+            today = datetime.now(timezone.utc).date()
             # Get Monday of current week (weekday() returns 0 for Monday)
             days_since_monday = today.weekday()
             current_week_monday = today - timedelta(days=days_since_monday)
@@ -677,7 +716,7 @@ class SevernTrentAPI:
         
         try:
             # Get readings from the past year
-            active_from = (datetime.now() - timedelta(days=365)).isoformat() + "Z"
+            active_from = _api_dt(datetime.now(timezone.utc) - timedelta(days=365))
             
             _LOGGER.debug("Fetching manual meter readings")
             
@@ -813,7 +852,8 @@ class SevernTrentAPI:
                 _LOGGER.error("GraphQL errors fetching balance: %s", data["errors"])
                 return {}
 
-            balance_raw = data.get("data", {}).get("account", {}).get("balance")
+            account_data = data.get("data", {}).get("account", {})
+            balance_raw = account_data.get("balance")
             if balance_raw is None:
                 _LOGGER.error("Balance missing in response")
                 return {}
@@ -827,9 +867,22 @@ class SevernTrentAPI:
 
             balance_gbp = round(balance_pence / 100.0, 2)
 
+            # Overdue balance (also pence-like)
+            overdue_raw = account_data.get("overdueBalance")
+            overdue_pence: int | None = None
+            overdue_gbp: float | None = None
+            if overdue_raw is not None:
+                try:
+                    overdue_pence = int(str(overdue_raw).strip())
+                    overdue_gbp = round(overdue_pence / 100.0, 2)
+                except (TypeError, ValueError):
+                    _LOGGER.warning("Overdue balance value not an integer: %r", overdue_raw)
+
             return {
                 "balance_pence": balance_pence,
                 "balance_gbp": balance_gbp,
+                "overdue_balance_pence": overdue_pence,
+                "overdue_balance_gbp": overdue_gbp,
             }
         except Exception as e:
             _LOGGER.error("Error fetching balance: %s", e, exc_info=True)
@@ -970,7 +1023,7 @@ class SevernTrentAPI:
 
         try:
             headers = {"Authorization": self.token}
-            active_from = datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+            active_from = _api_dt(datetime.now(timezone.utc))
 
             response = self.session.post(
                 API_URL,

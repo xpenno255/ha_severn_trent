@@ -5,11 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-05-22
+
+### Fixed
+- **Critical Fix**: DateTime double-timezone bug causing all smart meter API calls to fail with 400 errors
+  - Timezone-aware datetimes formatted with `.isoformat() + "Z"` produced invalid format like `2026-05-22T00:00:00+00:00Z`
+  - The Kraken API rejected these with `DateTime cannot represent value` error
+  - Added `_api_dt()` helper function that correctly formats both timezone-aware and naive datetimes
+  - Affected: smart meter daily/monthly readings, manual meter readings, and meter details queries
+- **Critical Fix**: MONETARY sensor state class mismatch causing HA warnings
+  - Changed `SensorStateClass.MEASUREMENT` → `SensorStateClass.TOTAL` for all 5 financial sensors
+  - HA requires `TOTAL` or `None` for `SensorDeviceClass.MONETARY`; `MEASUREMENT` is invalid
+  - Affected sensors: Balance, Overdue Balance, Payment Amount, Outstanding Payment, Next Payment Amount
+- **Fix**: Blocking `requests.Session()` creation in HA event loop
+  - Changed from eager initialization in `__init__` to lazy property
+  - Prevents HA warning about blocking calls in the event loop
+- **Fix**: Replaced all `datetime.utcnow()` calls with `datetime.now(timezone.utc)` (5 occurrences)
+  - `datetime.utcnow()` is deprecated in Python 3.12+
+  - Prevents `DeprecationWarning` errors when running with `-W error::DeprecationWarning`
+- **Fix**: Invalid `ReadingFrequencyType` enum value in daily readings retry
+  - Changed `"DAY"` → `"DAILY"` to match the Kraken GraphQL schema
+  - The API returned `400 Bad Request: Value 'DAY' does not exist in 'ReadingFrequencyType' enum`
+  - This caused the retry fallback to fail when `DAY_INTERVAL` returned no data
+- **Fix**: Skip `DAILY` retry for VISUAL/MANUAL meters that don't support daily aggregation
+  - VISUAL and MANUAL meters return `KT-CT-4710: Unsupported aggregation interval` for `DAILY`
+  - Now skips the retry and logs an info message instead of making a doomed API call
+
+### Added
+- **New Sensor**: `sensor.severn_trent_overdue_balance` – Shows overdue account balance separately
+- **New Sensor**: `sensor.severn_trent_smart_meter_status` – Diagnostic sensor showing smart meter data availability
+- **New Field**: `overdueBalance` added to `BALANCE_QUERY` GraphQL query
+- **New Tests**: 4 tests for `_api_dt()` datetime formatting helper (total: 116 tests)
+
+### Changed
+- Balance sensor now includes `overdue_balance_gbp` and `overdue_balance_pence` as extra state attributes
+- Added `_attr_has_entity_name = True` to base sensor for proper HA entity naming
+  - Entity names are now relative to device name (e.g. "Balance" instead of "Severn Trent Balance")
+  - HA displays as "Severn Trent Water (A-1234A123) Balance" — no more redundant "Severn Trent" prefix
+  - New sensors get clean entity IDs like `sensor.severn_trent_overdue_balance` instead of long prefixed IDs
+  - Existing entity IDs are preserved by HA (no breaking change for automations)
+
 ### [1.5.2] - 2026-01-20
--- bump version to fix an issue with home asisstant
+-- bump version to fix an issue with home assistant
 
 ## [1.5.1] - 2026-01-18
-- Update user documentation for retrival of the authenticaiton token from chrome dev tools
+- Update user documentation for retrieval of the authentication token from chrome dev tools
 
 ## [1.5.0] - 2026-01-17
 - Thanks to @RobXYZ the sensors are now part of a meter device.
@@ -35,14 +75,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed `MEASUREMENT` state class which is incompatible with `WATER` device class
   - Sensor now correctly represents an average rate without statistics tracking
   - Resolves Home Assistant warning about impossible state class configuration
-- **Critical Fix**: Changed from hourly to daily data fetching to match website behavior
+- **Critical Fix**: Changed from hourly to daily data fetching to match website behaviour
   - Now uses `DAY_INTERVAL` instead of `HOUR_INTERVAL` for daily readings
   - Eliminates potential data discrepancies from hourly aggregation
-  - Matches exact API behavior used by Severn Trent website
+  - Matches exact API behaviour used by Severn Trent website
   - Should resolve remaining value mismatches between integration and website
 - **Critical Fix**: Yesterday's usage now shows correct date
   - Changed from using most recent date in response to calculating yesterday as (today - 1 day)
-  - Matches website behavior which explicitly fetches data for yesterday's date
+  - Matches website behaviour which explicitly fetches data for yesterday's date
   - Resolves issue where today's partial data was shown instead of yesterday's complete day
 
 ## [1.4.0] - 2026-01-17
@@ -94,7 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Switched authentication to a browser token → API key flow
-- Added reauthentication support for refreshing the API key
+- Added re-authentication support for refreshing the API key
 
 ## [1.2.0] - 2024-XX-XX
 

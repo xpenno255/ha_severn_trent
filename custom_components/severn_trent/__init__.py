@@ -106,6 +106,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             if not smart_data and not manual_data:
                 _LOGGER.warning("No data returned from API")
+            elif not smart_data:
+                _LOGGER.warning(
+                    "Smart meter data unavailable for account %s; "
+                    "daily usage sensors will show unavailable. "
+                    "Check logs for 'get_meter_readings' errors.",
+                    entry.data.get(CONF_ACCOUNT_NUMBER),
+                )
+            else:
+                _LOGGER.debug(
+                    "Smart meter data OK: yesterday=%s, daily_avg=%s, wtd=%s, prev_week=%s",
+                    smart_data.get("yesterday_usage"),
+                    smart_data.get("daily_average"),
+                    smart_data.get("week_to_date_usage"),
+                    smart_data.get("previous_week_usage"),
+                )
 
             # Combine both datasets
             return {
