@@ -2,5 +2,6 @@
   "name": "Severn Trent",
   "content_in_root": false,
   "render_readme": true,
-  "hide_default_branch": false
+  "hide_default_branch": false,
+  "homeassistant": "2026.9.0"
 }

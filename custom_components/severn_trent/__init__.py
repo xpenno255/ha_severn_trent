@@ -7,10 +7,11 @@ from datetime import timedelta
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import SevernTrentAPI
+from .api import SevernTrentAPI, AuthenticationError, APIError
+from .statistics import WaterStatistics, usage_pattern
 from .const import (
     CONF_ACCOUNT_NUMBER,
     CONF_API_KEY,
@@ -27,10 +28,7 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Severn Trent from a config entry."""
     _LOGGER.info("Setting up Severn Trent integration")
-    _LOGGER.debug(
-        "Config entry data: %s",
-        {k: ("***" if k == CONF_API_KEY else v) for k, v in entry.data.items()},
-    )
+
 
     api_key = entry.data.get(CONF_API_KEY)
     if not api_key:
@@ -50,13 +48,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Authenticate
     if not await hass.async_add_executor_job(api.authenticate):
         _LOGGER.error("Authentication failed during setup")
+        await hass.async_add_executor_job(api.close)
+        if isinstance(api.auth_error, APIError):
+            raise ConfigEntryNotReady("Severn Trent authentication service unavailable")
         raise ConfigEntryAuthFailed("Authentication failed")
     
     _LOGGER.info("Authentication successful during setup")
 
     # Backfill capability type for existing installs (if missing)
     if not entry.data.get(CONF_CAPABILITY_TYPE):
-        identifiers_ok = await hass.async_add_executor_job(api._fetch_meter_identifiers)
+        try:
+            identifiers_ok = await hass.async_add_executor_job(api._fetch_meter_identifiers)
+        except AuthenticationError as err:
+            await hass.async_add_executor_job(api.close)
+            raise ConfigEntryAuthFailed(str(err)) from err
+        except APIError as err:
+            await hass.async_add_executor_job(api.close)
+            raise ConfigEntryNotReady(str(err)) from err
         if identifiers_ok and api.capability_type:
             hass.config_entries.async_update_entry(
                 entry,
@@ -66,6 +74,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 },
             )
     
+    history = WaterStatistics(hass, entry, api)
+
     async def async_update_data():
         """Fetch data from API."""
         try:
@@ -104,6 +114,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 api.get_meter_readings, official_reading_date
             )
 
+            if not any((manual_data, balance_data, payment_schedule_data,
+                        meter_details_data, outstanding_payment_data,
+                        next_payment_data, smart_data)):
+                raise UpdateFailed("No account or meter data returned by Severn Trent")
+
             if not smart_data and not manual_data:
                 _LOGGER.warning("No data returned from API")
             elif not smart_data:
@@ -122,8 +137,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     smart_data.get("previous_week_usage"),
                 )
 
+            if smart_data and api.capability_type not in ("VISUAL", "MANUAL"):
+                await history.async_update()
+
             # Combine both datasets
             return {
+                "history": history.status,
+                "usage_pattern": usage_pattern((history.cache or {}).get("days", {})),
                 "smart_meter": smart_data,
                 "manual_meter": manual_data,
                 "balance": balance_data,
@@ -138,6 +158,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     "capability_type": api.capability_type,
                 },
             }
+        except AuthenticationError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
+        except APIError as err:
+            raise UpdateFailed(str(err)) from err
+        except (ConfigEntryAuthFailed, UpdateFailed):
+            raise
         except Exception as err:
             _LOGGER.error("Error in update: %s", err, exc_info=True)
             raise UpdateFailed(f"Error communicating with API: {err}")
@@ -147,15 +173,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER,
         name="severn_trent",
         update_method=async_update_data,
-        update_interval=timedelta(hours=1),  # Update every hour for testing
+        update_interval=timedelta(hours=1),
     )
     
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except Exception:
+        await hass.async_add_executor_job(api.close)
+        raise
     
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
         "coordinator": coordinator,
         "api": api,
+        "history": history,
     }
     
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -165,6 +196,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id)
+        entry_data = hass.data[DOMAIN].pop(entry.entry_id)
+        await hass.async_add_executor_job(entry_data["api"].close)
     
     return unload_ok

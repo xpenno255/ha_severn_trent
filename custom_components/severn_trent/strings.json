@@ -3,9 +3,11 @@
     "step": {
       "user": {
         "title": "Severn Trent Water",
-        "description": "Log in to the Severn Trent dashboard in a web browser, open Developer Tools -> Network, click a request to https://my-account.stwater.co.uk/, then copy the long Authorization header value (starts with \"eyJ...\") and paste it here to generate a permanent API key. Your account and meter details will be discovered automatically.",
+        "description": "Reuse an existing connection or enter an API key. Alternatively, paste the Authorization token from your signed-in Severn Trent browser session. A browser token regenerates your API key and may invalidate keys used elsewhere. Reuse a connection when adding another account.",
         "data": {
-          "browser_token": "Browser Authorization Token"
+          "browser_token": "Browser Authorization Token",
+          "api_key": "API key",
+          "existing_account": "Reuse existing connection"
         }
       },
       "account_selection": {
@@ -17,9 +19,17 @@
       },
       "reauth_confirm": {
         "title": "Reauthenticate Severn Trent",
-        "description": "Paste a fresh browser Authorization token to generate a new API key.",
+        "description": "Enter a valid API key or a fresh browser Authorization token. A browser token regenerates the key; other accounts sharing the old key here will also be updated after verification.",
         "data": {
-          "browser_token": "Browser Authorization Token"
+          "browser_token": "Browser Authorization Token",
+          "api_key": "API key"
+        }
+      },
+      "meter_selection": {
+        "title": "Select water meter",
+        "description": "Select the meter to monitor for this account.",
+        "data": {
+          "device_id": "Meter serial number"
         }
       }
     },
@@ -28,7 +38,9 @@
       "cannot_generate_api_key": "Could not generate an API key from the browser token",
       "no_accounts": "No Severn Trent accounts found for this login",
       "cannot_fetch_meters": "Could not fetch meter information. Please contact support.",
-      "unknown": "Unexpected error occurred"
+      "unknown": "Unexpected error occurred",
+      "cannot_connect": "Severn Trent is temporarily unavailable. Try again later.",
+      "wrong_account": "This login cannot access the configured account."
     },
     "abort": {
       "already_configured": "Account is already configured",

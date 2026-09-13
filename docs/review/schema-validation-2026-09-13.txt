@@ -1,0 +1,25 @@
+AUTH_MUTATION: PASS
+API_KEY_MUTATION: PASS
+ACCOUNT_LIST_QUERY: PASS
+METER_IDENTIFIERS_QUERY: PASS
+METER_READINGS_QUERY: PASS
+  DEPRECATED: The field WaterMeterType.readings is deprecated. The 'readings' field is deprecated.
+
+Please use the `properties.measurements` field instead.
+
+- Marked as deprecated on 2025-06-17.
+- Scheduled for removal on or after 2025-12-01.
+SMART_METER_READINGS_QUERY: PASS
+BALANCE_QUERY: PASS
+RATE_LIMIT_QUERY: PASS
+PAYMENT_SCHEDULE_QUERY: PASS
+METER_DETAILS_QUERY: PASS
+  DEPRECATED: The field WaterMeterType.readings is deprecated. The 'readings' field is deprecated.
+
+Please use the `properties.measurements` field instead.
+
+- Marked as deprecated on 2025-06-17.
+- Scheduled for removal on or after 2025-12-01.
+OUTSTANDING_PAYMENT_QUERY: PASS
+LEDGERS_QUERY: PASS
+PAYMENT_FORECAST_QUERY: PASS

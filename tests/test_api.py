@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from custom_components.severn_trent.api import SevernTrentAPI
+from custom_components.severn_trent.api import SevernTrentAPI, APIError, AuthenticationError
 from custom_components.severn_trent.const import (
     API_KEY_MUTATION,
     API_URL,
@@ -218,18 +218,17 @@ class TestFetchAccountNumbers:
     def test_fetch_account_numbers_returns_empty_on_error(self, authenticated_api: SevernTrentAPI):
         """fetch_account_numbers() should return an empty list on GraphQL errors."""
         with patch.object(authenticated_api.session, "post", return_value=_make_response(AUTH_ERROR_RESPONSE)):
-            accounts = authenticated_api.fetch_account_numbers()
-            assert accounts == []
+            with pytest.raises((AuthenticationError, APIError)):
+                authenticated_api.fetch_account_numbers()
 
     def test_fetch_account_numbers_returns_empty_without_token(self, api: SevernTrentAPI):
         """fetch_account_numbers() should return empty list when no token is available."""
         # api has no token set
-    api_no_token = SevernTrentAPI(api_key="key", account_number="123")
-    # Force token expiry
-    api_no_token.token_expires_at = 0
-    with patch.object(api_no_token, "authenticate", return_value=False):
-        accounts = api_no_token.fetch_account_numbers()
-        assert accounts == []
+        api_no_token = SevernTrentAPI(api_key="key", account_number="123")
+        with patch.object(api_no_token, "authenticate", return_value=False):
+            with pytest.raises(AuthenticationError):
+                api_no_token.fetch_account_numbers()
+
 
 
 # ======================================================================
@@ -332,15 +331,16 @@ class TestGetBalance:
     def test_get_balance_returns_empty_on_error(self, authenticated_api: SevernTrentAPI):
         """get_balance() should return empty dict on GraphQL errors."""
         with patch.object(authenticated_api.session, "post", return_value=_make_response(AUTH_ERROR_RESPONSE)):
-            result = authenticated_api.get_balance()
-            assert result == {}
+            with pytest.raises((AuthenticationError, APIError)):
+                authenticated_api.get_balance()
 
     def test_get_balance_returns_empty_without_token(self, api: SevernTrentAPI):
         """get_balance() should return empty dict when no token is available."""
         api_no_token = SevernTrentAPI(api_key="key")
         api_no_token.token = None
-        result = api_no_token.get_balance()
-        assert result == {}
+        with patch.object(api_no_token, "authenticate", return_value=False):
+            with pytest.raises(AuthenticationError):
+                api_no_token.get_balance()
 
     def test_get_balance_returns_empty_without_account(self, authenticated_api: SevernTrentAPI):
         """get_balance() should return empty dict when no account number is set."""
@@ -377,8 +377,8 @@ class TestGetRateLimitInfo:
     def test_get_rate_limit_returns_empty_on_error(self, authenticated_api: SevernTrentAPI):
         """get_rate_limit_info() should return empty dict on GraphQL errors."""
         with patch.object(authenticated_api.session, "post", return_value=_make_response(AUTH_ERROR_RESPONSE)):
-            result = authenticated_api.get_rate_limit_info()
-            assert result == {}
+            with pytest.raises((AuthenticationError, APIError)):
+                authenticated_api.get_rate_limit_info()
 
 
 # ======================================================================
@@ -637,7 +637,6 @@ class TestGetMeterReadings:
         """Set up mock post to return a sequence of responses for get_meter_readings."""
         responses = [
             _make_response(AUTH_SUCCESS_RESPONSE),       # authenticate
-            _make_response(METER_IDENTIFIERS_RESPONSE),  # _fetch_meter_identifiers
             _make_response(SMART_METER_DAILY_RESPONSE),   # daily readings
             _make_response(SMART_METER_MONTHLY_RESPONSE), # monthly readings
         ]
@@ -682,8 +681,8 @@ class TestGetMeterReadings:
     def test_get_meter_readings_returns_empty_on_auth_failure(self, api: SevernTrentAPI):
         """get_meter_readings() should return {} when authentication fails."""
         with patch.object(api, "authenticate", return_value=False):
-            result = api.get_meter_readings()
-            assert result == {}
+            with pytest.raises(AuthenticationError):
+                api.get_meter_readings()
 
 
 # ======================================================================
@@ -704,8 +703,8 @@ class TestEdgeCases:
         """Methods should handle missing 'data' key gracefully."""
         no_data_response = {"errors": [{"message": "Not found"}]}
         with patch.object(authenticated_api.session, "post", return_value=_make_response(no_data_response)):
-            result = authenticated_api.get_balance()
-            assert result == {}
+            with pytest.raises((AuthenticationError, APIError)):
+                authenticated_api.get_balance()
 
     def test_http_error_returns_empty(self, authenticated_api: SevernTrentAPI):
         """Methods should handle HTTP errors gracefully."""

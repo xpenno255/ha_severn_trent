@@ -12,20 +12,6 @@ import pytest
 # without needing homeassistant installed
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# Mock homeassistant modules before importing any custom_components
-# so that __init__.py imports don't fail
-for mod in [
-    "homeassistant",
-    "homeassistant.config_entries",
-    "homeassistant.const",
-    "homeassistant.core",
-    "homeassistant.exceptions",
-    "homeassistant.helpers",
-    "homeassistant.helpers.update_coordinator",
-]:
-    if mod not in sys.modules:
-        sys.modules[mod] = MagicMock()
-
 from custom_components.severn_trent.api import SevernTrentAPI
 from custom_components.severn_trent.const import API_URL
 
@@ -179,6 +165,7 @@ MANUAL_READINGS_RESPONSE = {
                     "activeWaterMeters": [
                         {
                             "id": "meter-1",
+                            "serialNumber": "DEV456",
                             "numberOfDigits": 5,
                             "readings": {
                                 "edges": [

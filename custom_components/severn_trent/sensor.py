@@ -20,6 +20,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 
 from .const import DOMAIN
+from .api import WATER_TIME_ZONE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class SevernTrentBaseSensor(SensorEntity):
     """Base sensor with device info."""
 
     _attr_has_entity_name = True
+    _attr_should_poll = False
 
     def __init__(
         self,
@@ -65,6 +67,22 @@ class SevernTrentBaseSensor(SensorEntity):
         self._attr_available = self.coordinator.last_update_success and self._attr_native_value is not None
         self.async_write_ha_state()
 
+    async def async_update(self) -> None:
+        """Route manual entity refreshes through the shared coordinator."""
+        await self.coordinator.async_request_refresh()
+
+    def _set_period_reset(self, period_start: str | None) -> None:
+        """Identify a consumption period even when successive totals are equal."""
+        if self._attr_native_value is None:
+            return
+        try:
+            self._attr_last_reset = datetime.fromisoformat(period_start).replace(
+                tzinfo=WATER_TIME_ZONE
+            )
+        except (TypeError, ValueError):
+            # Never publish a period total with an unknown reset boundary.
+            self._attr_native_value = None
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -94,6 +112,9 @@ async def async_setup_entry(
         SevernTrentNextPaymentAmountSensor(coordinator, account_number),
         SevernTrentNextPaymentDateSensor(coordinator, account_number),
         SevernTrentSmartMeterStatusSensor(coordinator, account_number),
+        SevernTrentLatestDailySensor(coordinator, account_number),
+        SevernTrentHistorySensor(coordinator, account_number),
+        SevernTrentUsagePatternSensor(coordinator, account_number),
     ]
 
     async_add_entities(sensors)
@@ -121,6 +142,11 @@ class SevernTrentBalanceSensor(SevernTrentBaseSensor):
         balance = data.get("balance") or {}
         self._attr_native_value = balance.get("balance_gbp")
         attrs: dict[str, Any] = {}
+        value = balance.get("balance_gbp")
+        if value is not None:
+            attrs["balance_status"] = "credit" if value > 0 else "debit" if value < 0 else "settled"
+            attrs["credit_gbp"] = max(value, 0)
+            attrs["amount_owed_gbp"] = max(-value, 0)
         if "balance_pence" in balance:
             attrs["balance_pence"] = balance.get("balance_pence")
         if "overdue_balance_gbp" in balance and balance.get("overdue_balance_gbp") is not None:
@@ -162,7 +188,7 @@ class SevernTrentYesterdayUsageSensor(SevernTrentBaseSensor):
     """Sensor for yesterday's water usage."""
 
     _attr_device_class = SensorDeviceClass.WATER
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = UnitOfVolume.CUBIC_METERS
     _attr_icon = "mdi:water"
 
@@ -180,6 +206,7 @@ class SevernTrentYesterdayUsageSensor(SevernTrentBaseSensor):
         data = self.coordinator.data or {}
         smart = data.get("smart_meter") or {}
         self._attr_native_value = smart.get("yesterday_usage")
+        self._set_period_reset(smart.get("yesterday_date"))
         self._attr_extra_state_attributes = {
             "date": smart.get("yesterday_date"),
             "meter_id": smart.get("meter_id"),
@@ -208,9 +235,10 @@ class SevernTrentAverageDailyUsageSensor(SevernTrentBaseSensor):
         data = self.coordinator.data or {}
         smart = data.get("smart_meter") or {}
         self._attr_native_value = smart.get("daily_average")
-        all_readings = smart.get("all_readings", [])
         self._attr_extra_state_attributes = {
-            "recent_readings": all_readings[:7] if all_readings else [],
+            "recent_readings": smart.get("recent_readings", []),
+            "days_received": smart.get("days_in_average", 0),
+            "days_expected": 7,
             "period": "7 days",
         }
         super()._handle_coordinator_update()
@@ -237,9 +265,11 @@ class SevernTrentWeekToDateSensor(SevernTrentBaseSensor):
         data = self.coordinator.data or {}
         smart = data.get("smart_meter") or {}
         self._attr_native_value = smart.get("week_to_date_usage")
+        self._set_period_reset(smart.get("week_start_date"))
         self._attr_extra_state_attributes = {
             "week_start": smart.get("week_start_date"),
             "days_in_week": smart.get("days_in_current_week"),
+            "days_expected": smart.get("days_expected_current_week"),
         }
         super()._handle_coordinator_update()
 
@@ -266,10 +296,12 @@ class SevernTrentPreviousWeekSensor(SevernTrentBaseSensor):
         data = self.coordinator.data or {}
         smart = data.get("smart_meter") or {}
         self._attr_native_value = smart.get("previous_week_usage")
+        self._set_period_reset(smart.get("previous_week_start_date"))
         self._attr_extra_state_attributes = {
             "week_start": smart.get("previous_week_start_date"),
             "week_end": smart.get("previous_week_end_date"),
             "days_in_week": 7,
+            "days_received": smart.get("days_in_previous_week"),
         }
         super()._handle_coordinator_update()
 
@@ -316,7 +348,8 @@ class SevernTrentEstimatedMeterReadingSensor(SevernTrentBaseSensor):
     """Sensor for estimated current meter reading based on official reading + daily usage."""
 
     _attr_device_class = SensorDeviceClass.WATER
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    # Estimates can be corrected downwards; that is not a physical meter reset.
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = UnitOfVolume.CUBIC_METERS
     _attr_icon = "mdi:gauge"
 
@@ -340,7 +373,7 @@ class SevernTrentEstimatedMeterReadingSensor(SevernTrentBaseSensor):
         monthly_readings = smart_data.get("monthly_readings") or []
         daily_readings = smart_data.get("daily_readings_since_official") or []
 
-        if not latest_official or not official_date:
+        if latest_official is None or not official_date:
             self._attr_native_value = None
             self._attr_extra_state_attributes = {}
             super()._handle_coordinator_update()
@@ -359,45 +392,72 @@ class SevernTrentEstimatedMeterReadingSensor(SevernTrentBaseSensor):
             super()._handle_coordinator_update()
             return
 
-        usage_since_official = 0
-        for reading in daily_readings:
-            usage_since_official += reading.get("value", 0)
+        today = datetime.now(WATER_TIME_ZONE).date()
+        official_day = official_dt.date()
+        if official_day > today:
+            self._attr_native_value = None
+            self._attr_extra_state_attributes = {"reason": "Official reading date is in the future"}
+            super()._handle_coordinator_update()
+            return
 
-        official_month_start = official_dt.replace(day=1)
-        is_first_of_month = official_dt.day == 1
-        monthly_periods_included = 0
+        if official_dt.month == 12:
+            next_month = official_dt.replace(year=official_dt.year + 1, month=1, day=1)
+        else:
+            next_month = official_dt.replace(month=official_dt.month + 1, day=1)
 
-        for reading in monthly_readings:
-            reading_date = reading.get("start_date")
-            if not reading_date:
-                continue
-            try:
-                reading_date_str = reading_date.split("T")[0] if "T" in reading_date else reading_date
-                reading_dt = datetime.fromisoformat(reading_date_str)
-            except (ValueError, AttributeError):
-                continue
-
-            if is_first_of_month:
-                should_include = reading_dt >= official_dt
+        # Require each daily interval in the initial partial month and each
+        # following monthly interval. An absent period is not zero consumption.
+        daily_by_date = {r.get("date"): r.get("value") for r in daily_readings}
+        monthly_by_date = {r.get("start_date"): r.get("value") for r in monthly_readings}
+        missing_periods = []
+        included_daily = []
+        included_monthly = []
+        if official_dt.day != 1:
+            day = official_day
+            while day < min(next_month.date(), today):
+                value = daily_by_date.get(day.isoformat())
+                if value is None:
+                    missing_periods.append(day.isoformat())
+                else:
+                    included_daily.append(value)
+                day += timedelta(days=1)
+            month = next_month.date()
+        else:
+            month = official_day
+        while month < today:
+            value = monthly_by_date.get(month.isoformat())
+            if value is None:
+                missing_periods.append(month.isoformat())
             else:
-                should_include = reading_dt > official_month_start
+                included_monthly.append(value)
+            month = (month.replace(day=28) + timedelta(days=4)).replace(day=1)
 
-            if should_include:
-                usage_since_official += reading.get("value", 0)
-                monthly_periods_included += 1
+        if missing_periods:
+            self._attr_native_value = None
+            self._attr_extra_state_attributes = {
+                "last_official_reading": latest_official,
+                "last_official_date": official_date,
+                "missing_periods": missing_periods,
+                "reason": "Usage history does not cover the period since the official reading",
+            }
+            super()._handle_coordinator_update()
+            return
+
+        usage_since_official = sum(included_daily) + sum(included_monthly)
+        monthly_periods_included = len(included_monthly)
 
         estimated_current = latest_official + usage_since_official
         self._attr_native_value = round(estimated_current, 3)
 
-        days_since_official = (datetime.now() - official_dt).days
+        days_since_official = (today - official_day).days
         self._attr_extra_state_attributes = {
             "last_official_reading": latest_official,
             "last_official_date": official_date,
-            "usage_since_official": round(usage_since_official, 3) if usage_since_official else None,
+            "usage_since_official": round(usage_since_official, 3),
             "days_since_official": days_since_official,
-            "daily_periods_included": len(daily_readings),
+            "daily_periods_included": len(included_daily),
             "monthly_periods_included": monthly_periods_included,
-            "estimation_note": "Official reading + daily usage (partial month) + monthly totals (complete months)",
+            "estimation_note": "Official reading + available usage; current month may contain delayed or partial readings",
         }
         super()._handle_coordinator_update()
 
@@ -708,12 +768,22 @@ class SevernTrentSmartMeterStatusSensor(SevernTrentBaseSensor):
             daily_avg = smart.get("daily_average")
             wtd = smart.get("week_to_date_usage")
             prev_week = smart.get("previous_week_usage")
-            has_daily_data = yesterday is not None or daily_avg is not None
-            self._attr_native_value = "ok" if has_daily_data else "no_daily_data"
+            has_daily_data = bool(smart.get("all_readings"))
+            if not has_daily_data:
+                self._attr_native_value = "no_daily_data"
+            elif yesterday is None:
+                self._attr_native_value = "stale_data"
+            elif daily_avg is None or wtd is None or prev_week is None:
+                self._attr_native_value = "incomplete_data"
+            else:
+                self._attr_native_value = "ok"
             self._attr_extra_state_attributes = {
                 "smart_meter_data": True,
                 "manual_meter_data": bool(manual),
                 "has_daily_readings": has_daily_data,
+                "latest_daily_date": smart.get("latest_daily_date"),
+                "days_in_average": smart.get("days_in_average", 0),
+                "days_in_previous_week": smart.get("days_in_previous_week", 0),
                 "yesterday_usage": yesterday,
                 "daily_average": daily_avg,
                 "week_to_date_usage": wtd,
@@ -722,4 +792,53 @@ class SevernTrentSmartMeterStatusSensor(SevernTrentBaseSensor):
                 "monthly_readings_count": len(smart.get("monthly_readings", [])),
                 "all_readings_count": len(smart.get("all_readings", [])),
             }
+        super()._handle_coordinator_update()
+
+
+class SevernTrentLatestDailySensor(SevernTrentBaseSensor):
+    """Date of the latest available completed-day reading."""
+    _attr_device_class = SensorDeviceClass.DATE
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, account_number):
+        super().__init__(coordinator, account_number)
+        self._attr_name = "Latest daily reading"
+        self._attr_unique_id = f"{account_number}_latest_daily_reading"
+
+    def _handle_coordinator_update(self):
+        value = ((self.coordinator.data or {}).get("smart_meter") or {}).get("latest_daily_date")
+        self._attr_native_value = datetime.fromisoformat(value).date() if value else None
+        super()._handle_coordinator_update()
+
+
+class SevernTrentHistorySensor(SevernTrentBaseSensor):
+    """Expose import progress and the Energy Dashboard statistic identifier."""
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, account_number):
+        super().__init__(coordinator, account_number)
+        self._attr_name = "Water history status"
+        self._attr_unique_id = f"{account_number}_history_status"
+
+    def _handle_coordinator_update(self):
+        history = (self.coordinator.data or {}).get("history") or {}
+        self._attr_native_value = history.get("status", "no_daily_data")
+        self._attr_extra_state_attributes = history
+        super()._handle_coordinator_update()
+
+
+class SevernTrentUsagePatternSensor(SevernTrentBaseSensor):
+    """Optional sustained usage comparison, based only on complete recent data."""
+    _attr_entity_registry_enabled_default = False
+    _attr_icon = "mdi:water-alert"
+
+    def __init__(self, coordinator, account_number):
+        super().__init__(coordinator, account_number)
+        self._attr_name = "Usage pattern"
+        self._attr_unique_id = f"{account_number}_usage_pattern"
+
+    def _handle_coordinator_update(self):
+        pattern = (self.coordinator.data or {}).get("usage_pattern") or {}
+        self._attr_native_value = pattern.get("status", "insufficient_data")
+        self._attr_extra_state_attributes = pattern
         super()._handle_coordinator_update()

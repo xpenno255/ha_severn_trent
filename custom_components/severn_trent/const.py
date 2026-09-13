@@ -60,6 +60,7 @@ query MeterReadings($accountNumber: String!, $activeFrom: DateTime) {
     properties(activeFrom: $activeFrom) {
       activeWaterMeters {
         id
+        serialNumber
         numberOfDigits
         readings(first: 10, excludeHeld: true, excludeQuarantined: true) {
           edges {
@@ -86,6 +87,7 @@ query SmartMeterReadings($accountNumber: String!, $startAt: DateTime, $endAt: Da
         endAt: $endAt
         utilityFilters: $utilityFilters
       ) {
+        pageInfo { hasNextPage endCursor }
         edges {
           node {
             ... on IntervalMeasurementType {
@@ -184,6 +186,7 @@ OUTSTANDING_PAYMENT_QUERY = """
 query OutstandingPayment($accountNumber: String!) {
   account(accountNumber: $accountNumber) {
     ledgers {
+      ledgerType
       paymentsOutstanding
     }
   }

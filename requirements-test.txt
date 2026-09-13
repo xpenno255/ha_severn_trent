@@ -1,0 +1,5 @@
+homeassistant==2026.9.2
+pytest>=8
+pytest-asyncio>=1
+requests>=2.32
+graphql-core>=3.2,<4

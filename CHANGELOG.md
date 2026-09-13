@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-09-13
+
+### Fixed
+- Identify daily and weekly consumption periods with explicit reset timestamps, preventing negative Monday resets (#30) and counting equal totals in successive periods correctly.
+- Calculate the 7-day average from exactly seven completed UK calendar days, including BST transitions.
+- Keep missing/invalid readings unavailable instead of turning them into zero; expose period coverage and stale data in attributes/status.
+- Convert litres to cubic metres and reject non-finite or unsupported usage values.
+- Keep daily usage available when monthly history requests fail.
+- Require the necessary history for estimated readings; accept zero baselines and avoid treating downward estimate corrections as meter replacements.
+- Add connect/read timeouts to every request and remove token-bearing authentication logging.
+- Route manual entity refreshes through the shared coordinator and close sessions when unloading.
+
+### Added
+- Dated external water statistics for the Energy Dashboard: persistent cache, one-year staged backfill, late-reading recovery and correction replay.
+- Latest daily reading and water history status diagnostics, plus an optional sustained high-usage indicator (disabled by default).
+- Allowlisted diagnostics downloads and explicit credit/debit balance attributes.
+- API key reuse, verified reauthentication across accounts sharing a key, and explicit meter selection.
+- Regression tests against real Home Assistant sensor classes and the recorder statistics compiler.
+- An anonymous public-schema validation script and CI test workflow.
+
+### Changed
+- Require Home Assistant 2026.9 or later; tested against 2026.9.2 with Python 3.14.
+- Reuse valid authentication tokens, cache stable meter/ledger metadata for 24 hours, and match the selected meter across properties.
+- Distinguish rejected credentials from temporary API/transport failures.
+
+### Known limitation
+- Retain deprecated official-reading queries: the advertised point-in-time replacement was rejected by the live supplier API. Daily history uses the supported measurements endpoint.
+
+### Documentation
+- Explain dashboard reporting delays, weekly-boundary limitations and existing-statistics repair.
+
 ## [1.8.0] - 2026-05-22
 
 ### Fixed
