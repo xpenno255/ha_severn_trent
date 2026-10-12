@@ -48,14 +48,14 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 
 ### Installing a pre-release
 
-Pre-releases are marked as such on GitHub, so HACS only offers them when you ask:
+HACS does not install pre-releases by default, but you can pick one manually:
 
 1. Open HACS and select **Severn Trent Water**
 2. Open the three dots menu and select **Redownload**
 3. Turn on **Need a different version?** and pick the pre-release (for example `v1.9.1b0`)
 4. Click **Download**, then restart Home Assistant
 
-If the pre-release is not in the list, enable pre-releases for this repository first: in HACS 2.x this is the **Pre-release** switch on the repository's device under **Settings → Devices & services → HACS**. To go back, repeat the steps and pick `v1.8.0`.
+To go back, repeat the steps and pick `v1.8.0`.
 
 ### Manual Installation
 
