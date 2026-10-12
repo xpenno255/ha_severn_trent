@@ -96,7 +96,7 @@ def test_missing_previous_week_day_is_not_partial_total(authenticated_api):
     assert result["daily_average"] == 1
 
 
-@pytest.mark.parametrize("value", [None, "bad", "NaN", "Infinity", -1])
+@pytest.mark.parametrize("value", [None, "bad", "NaN", "Infinity"])
 def test_invalid_reading_does_not_become_zero(authenticated_api, value):
     days = complete_days()
     days["2026-09-12"] = value
@@ -116,6 +116,38 @@ def test_dst_days_have_correct_interval_length(day, hours):
     start = datetime.fromisoformat(day).replace(tzinfo=WATER_TIME_ZONE)
     finish = start + timedelta(days=1)
     assert (datetime.fromisoformat(_api_dt(finish)) - datetime.fromisoformat(_api_dt(start))).total_seconds() == hours * 3600
+
+
+def test_negative_supplier_correction_is_kept(authenticated_api):
+    # Live API returned -0.14 m³ for 2026-09-30; dropping it blanked the week.
+    days = complete_days()
+    days["2026-09-12"] = "-0.140000000000000000"
+    result = fetch_usage(authenticated_api, days)
+    assert result["yesterday_usage"] == -0.14
+    assert result["daily_average"] == round((6 - 0.14) / 7, 3)
+
+
+def test_empty_daily_data_does_not_retry_unsupported_interval(authenticated_api):
+    with (
+        patch.object(authenticated_api, "authenticate", return_value=True),
+        patch.object(authenticated_api.session, "post", side_effect=[
+            _make_response(readings_response({})), _make_response(readings_response({})),
+        ]) as post,
+        patch("custom_components.severn_trent.api.datetime", FrozenDateTime),
+    ):
+        result = authenticated_api.get_meter_readings()
+    frequencies = [c.kwargs["json"]["variables"]["utilityFilters"][0]["waterFilters"]["readingFrequencyType"]
+                   for c in post.call_args_list]
+    assert frequencies == ["DAY_INTERVAL", "MONTH_INTERVAL"]
+    assert result["yesterday_usage"] is None
+
+
+def test_query_error_message_is_surfaced(authenticated_api):
+    from custom_components.severn_trent.api import APIError
+    error = {"errors": [{"message": "Unsupported aggregation interval."}]}
+    with patch.object(authenticated_api.session, "post", return_value=_make_response(error)):
+        with pytest.raises(APIError, match="Unsupported aggregation interval"):
+            authenticated_api.get_balance()
 
 
 def test_litres_are_converted_to_cubic_metres():
@@ -211,15 +243,26 @@ def test_monthly_http_failure_keeps_daily_totals(authenticated_api):
     assert result["monthly_readings"] == []
 
 
-def test_estimate_requires_complete_history():
+def test_estimate_flags_gaps_in_history():
     sensor, coordinator = sensor_instance(SevernTrentEstimatedMeterReadingSensor, {
         "monthly_readings": [{"start_date": "2026-09-01", "value": 3}],
     })
     coordinator.data["manual_meter"] = {"latest_reading": 100, "reading_date": "2026-08-01"}
     with patch("custom_components.severn_trent.sensor.datetime", FrozenDateTime):
         sensor._handle_coordinator_update()
-    assert sensor.native_value is None
+    assert sensor.available
+    assert sensor.native_value == 103
+    assert sensor.extra_state_attributes["complete"] is False
     assert sensor.extra_state_attributes["missing_periods"] == ["2026-08-01"]
+
+
+def test_estimate_without_any_history_is_unknown():
+    sensor, coordinator = sensor_instance(SevernTrentEstimatedMeterReadingSensor, {})
+    coordinator.data["manual_meter"] = {"latest_reading": 100, "reading_date": "2026-08-01"}
+    with patch("custom_components.severn_trent.sensor.datetime", FrozenDateTime):
+        sensor._handle_coordinator_update()
+    assert sensor.native_value is None
+    assert sensor.extra_state_attributes["missing_periods"] == ["2026-08-01", "2026-09-01"]
 
 
 def test_estimate_uses_partial_month_once_and_ignores_extra_days():
@@ -238,11 +281,12 @@ def test_estimate_uses_partial_month_once_and_ignores_extra_days():
     with patch("custom_components.severn_trent.sensor.datetime", FrozenDateTime):
         sensor._handle_coordinator_update()
     assert sensor.native_value == 103.5
+    assert sensor.extra_state_attributes["complete"] is True
     assert sensor.extra_state_attributes["daily_periods_included"] == 1
     assert sensor.extra_state_attributes["monthly_periods_included"] == 1
 
 
-def test_midmonth_baseline_does_not_silently_lose_missing_daily_usage():
+def test_midmonth_baseline_reports_missing_daily_usage():
     sensor, coordinator = sensor_instance(SevernTrentEstimatedMeterReadingSensor, {
         "monthly_readings": [{"start_date": "2026-09-01", "value": 3}],
         "daily_readings_since_official": [],
@@ -250,7 +294,8 @@ def test_midmonth_baseline_does_not_silently_lose_missing_daily_usage():
     coordinator.data["manual_meter"] = {"latest_reading": 100, "reading_date": "2026-08-31"}
     with patch("custom_components.severn_trent.sensor.datetime", FrozenDateTime):
         sensor._handle_coordinator_update()
-    assert sensor.native_value is None
+    assert sensor.native_value == 103
+    assert sensor.extra_state_attributes["complete"] is False
     assert sensor.extra_state_attributes["missing_periods"] == ["2026-08-31"]
 
 

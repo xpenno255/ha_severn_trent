@@ -62,3 +62,13 @@ async def test_network_failure_is_retryable_and_closes_client():
         result=await flow.async_step_user({'api_key':'existing'})
     assert result['errors']=={'base':'cannot_connect'}
     api.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_options_flow_saves_polling_interval():
+    from custom_components.severn_trent.config_flow import SevernTrentOptionsFlow
+    flow = SevernTrentConfigFlow.async_get_options_flow(None)
+    assert isinstance(flow, SevernTrentOptionsFlow)
+    flow.async_create_entry = MagicMock(side_effect=lambda **kw: kw)
+    result = await flow.async_step_init({"scan_interval": 30.0})
+    assert result == {"data": {"scan_interval": 30}}

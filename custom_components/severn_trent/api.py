@@ -24,14 +24,17 @@ def _reading_date(value: str) -> str:
 
 
 def _water_volume(node: dict[str, Any]) -> float:
-    """Read a finite, non-negative volume in cubic metres."""
+    """Read a finite volume in cubic metres.
+
+    Negative values are supplier corrections to earlier days and are kept.
+    """
     value = float(node["value"])
     unit = str(node.get("unit", "")).strip().lower()
     if unit in ("l", "litre", "litres", "liter", "liters"):
         value /= 1000
     elif unit not in ("m³", "m3", "m^3"):
         raise ValueError("Unsupported water measurement unit")
-    if not math.isfinite(value) or value < 0:
+    if not math.isfinite(value):
         raise ValueError("Invalid water measurement volume")
     return value
 
@@ -105,6 +108,7 @@ class SevernTrentAPI:
         self._details_at = 0
         self._ledger_cache = None
         self._ledger_at = 0
+        self._no_daily_logged = False
 
     @property
     def session(self) -> requests.Session:
@@ -145,7 +149,15 @@ class SevernTrentAPI:
                 self.token = None
                 self.token_expires_at = 0
                 raise AuthenticationError("Severn Trent credentials have expired or been rejected")
-            raise APIError("Severn Trent could not complete the query")
+            # Supplier error messages carry no credentials; surface them so
+            # failures are diagnosable from the UI and log.
+            detail = "; ".join(dict.fromkeys(
+                str(e.get("message", "")).strip() for e in errors if e.get("message")
+            ))[:200]
+            raise APIError(
+                f"Severn Trent could not complete the query: {detail}" if detail
+                else "Severn Trent could not complete the query"
+            )
         return response
 
     @staticmethod
@@ -474,55 +486,6 @@ class SevernTrentAPI:
 
                 return {}
 
-            # Some accounts/meters appear to return 0 edges for DAY_INTERVAL; try an alternate enum.
-            # Only retry for smart meter types (AMI/AMR) — VISUAL/MANUAL meters don't support daily aggregation.
-            if not measurements and self.capability_type not in ("VISUAL", "MANUAL"):
-                _LOGGER.warning(
-                    "No daily measurements returned for DAY_INTERVAL (MSPID=%s, DeviceID=%s); "
-                    "retrying with readingFrequencyType=DAILY",
-                    self.market_supply_point_id, self.device_id,
-                )
-                daily_retry = self._post(
-                    API_URL,
-                    timeout=REQUEST_TIMEOUT,
-                    headers=headers,
-                    json={
-                        "query": SMART_METER_READINGS_QUERY,
-                        "variables": {
-                            "accountNumber": self.account_number,
-                            "startAt": _api_dt(start_date),
-                            "endAt": _api_dt(end_date),
-                            "utilityFilters": [
-                                {
-                                    "waterFilters": {
-                                        "readingFrequencyType": "DAILY",
-                                        "marketSupplyPointId": self.market_supply_point_id,
-                                        "deviceId": self.device_id,
-                                    }
-                                }
-                            ],
-                        },
-                        "operationName": "SmartMeterReadings",
-                    },
-                )
-                daily_retry.raise_for_status()
-                daily_data = daily_retry.json()
-                if "errors" in daily_data:
-                    _LOGGER.error(
-                        "GraphQL errors fetching daily data (retry): %s",
-                        daily_data["errors"],
-                    )
-                else:
-                    retry_measurements = _extract_measurements(daily_data)
-                    if retry_measurements is not None:
-                        measurements = retry_measurements
-            elif not measurements:
-                _LOGGER.info(
-                    "No daily measurements for %s meter (MSPID=%s, DeviceID=%s); "
-                    "skipping DAILY retry as this meter type does not support daily aggregation",
-                    self.capability_type, self.market_supply_point_id, self.device_id,
-                )
-            
             # Fetch monthly readings (last 12 months for estimation calculations)
             monthly_start = (end_date - timedelta(days=365)).replace(day=1)
             if official_reading_date:
@@ -603,13 +566,16 @@ class SevernTrentAPI:
             _LOGGER.info("Found %d monthly readings (after deduplication)", len(monthly_readings))
 
             if not measurements:
-                _LOGGER.warning(
+                # Repeats hourly for meters without daily data; warn only once.
+                _LOGGER.log(
+                    logging.DEBUG if self._no_daily_logged else logging.WARNING,
                     "No daily measurements found for account %s (MSPID=%s, DeviceID=%s, "
                     "capabilityType=%s); returning monthly-only payload. "
                     "This usually means the meter does not have smart/daily readings available.",
                     self.account_number, self.market_supply_point_id,
                     self.device_id, self.capability_type,
                 )
+                self._no_daily_logged = True
                 return {
                     "meter_id": f"{self.market_supply_point_id}_{self.device_id}",
                     "yesterday_usage": None,

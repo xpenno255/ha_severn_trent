@@ -3,9 +3,13 @@ from __future__ import annotations
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.core import callback
+from homeassistant.helpers import selector
 from .api import SevernTrentAPI, APIError, AuthenticationError
 from .const import (DOMAIN, CONF_API_KEY, CONF_BROWSER_TOKEN, CONF_ACCOUNT_NUMBER,
-                    CONF_DEVICE_ID, CONF_MARKET_SUPPLY_POINT_ID, CONF_CAPABILITY_TYPE)
+                    CONF_DEVICE_ID, CONF_MARKET_SUPPLY_POINT_ID, CONF_CAPABILITY_TYPE,
+                    CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, MIN_SCAN_INTERVAL,
+                    MAX_SCAN_INTERVAL)
 
 
 class SevernTrentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -17,6 +21,11 @@ class SevernTrentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.account_numbers = []
         self.meters = []
         self._reauth_entry = None
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return SevernTrentOptionsFlow()
 
     async def _connect(self, user_input):
         key = user_input.get(CONF_API_KEY, '').strip()
@@ -135,3 +144,16 @@ class SevernTrentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             finally:
                 await self._close()
         return self.async_show_form(step_id='reauth_confirm', data_schema=self._credential_schema(), errors=errors)
+
+
+class SevernTrentOptionsFlow(config_entries.OptionsFlowWithReload):
+    """Polling interval, kept in entry options so it survives updates."""
+
+    async def async_step_init(self, user_input=None):
+        if user_input is not None:
+            return self.async_create_entry(data={CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL])})
+        current = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        return self.async_show_form(step_id='init', data_schema=vol.Schema({
+            vol.Required(CONF_SCAN_INTERVAL, default=current): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL, step=1,
+                    unit_of_measurement='min', mode=selector.NumberSelectorMode.BOX))}))

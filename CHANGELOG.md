@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.1b0] - 2026-10-12 (pre-release)
+
+### Fixed
+- Integration stuck on "Failed setup, will retry: Severn Trent could not complete the query" (#31, #33, #26). Meters with no recent daily data triggered a retry using `DAILY`, which the supplier always rejects; the retry is removed. A single failing query no longer stops the whole refresh: other sensors keep updating, and only rejected credentials stop it.
+- Supplier error messages are now included in errors and the log instead of a generic message.
+- "No daily measurements" is logged once instead of every hour.
+- Negative daily values (supplier corrections) are accepted. Previously one correction stopped Energy Dashboard history imports ("retrying") and blanked weekly totals and the 7-day average.
+- Estimated meter reading no longer becomes unavailable because of a single missing day in the supplier's history (#32). Gaps are listed in `missing_periods` with `complete: false`.
+
+### Added
+- Polling interval option (15–1440 minutes) under the integration's **Configure** button, kept across updates (#34).
+
 ## [1.9.0] - 2026-09-13
 
 ### Fixed

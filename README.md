@@ -14,7 +14,7 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 - **Account Balance**: Current account balance and overdue balance
 - **Payment Information**: Direct debit amount, next payment date, and outstanding payments
 - **Smart Meter Diagnostics**: Meter ID, capability type, API rate limit status, and smart meter data availability
-- **Automatic Updates**: Data refreshes every hour
+- **Automatic Updates**: Data refreshes every hour by default; change the interval in the integration's options
 - **Native Home Assistant Integration**: Full support for Home Assistant's sensor platform with proper units and device classes
 
 ## Requirements
@@ -176,6 +176,7 @@ Each sensor includes additional attributes:
 - Days since official reading
 - Number of daily periods included (partial month)
 - Number of monthly periods included (complete months)
+- `complete` and `missing_periods`: whether any days or months are absent from the supplier's history
 - Estimation note
 
 **Balance:**
@@ -202,7 +203,7 @@ Each sensor includes additional attributes:
 
 ## How the Estimated Meter Reading Works
 
-The estimated meter reading combines your official reading with available consumption. It is not a live meter reading: current-month totals may be partial or delayed. Missing daily or monthly periods make the estimate unavailable, with the missing periods listed in its attributes. A zero official reading is valid.
+The estimated meter reading combines your official reading with available consumption. It is not a live meter reading: current-month totals may be partial or delayed. Severn Trent's history has occasional permanent gaps, so the estimate sums the periods that exist and lists any absent days or months in `missing_periods`, with `complete: false`. It is unavailable only when there is no usage history at all since the official reading. A zero official reading is valid.
 
 1. Starts with your last official meter reading (taken every ~6 months by Severn Trent)
 2. If the official reading was taken mid-month, adds daily usage totals from that date to the end of that month
@@ -258,7 +259,7 @@ If `yesterday_usage`, `daily_average`, `week_to_date`, or `previous_week` show a
 | `error` | No data returned from the API at all |
 
 Common causes:
-- **No smart meter**: If your account only has a manual meter, daily usage sensors will be unavailable. The official meter reading still works. The estimate requires consumption history covering the period since that reading.
+- **No smart meter**: If your account only has a manual meter, daily usage sensors will be unavailable. The official meter reading still works. The estimate needs some consumption history since that reading.
 - **API rate limiting**: Check `sensor.severn_trent_api_rate_limit_remaining` — if `is_blocked` is `true`, wait for the rate limit to reset.
 - **Incorrect meter identifiers**: Try reconfiguring the integration to rediscover meter details.
 
@@ -311,16 +312,7 @@ This integration uses the Kraken API platform (developed by Octopus Energy and u
 
 ## Update Frequency
 
-By default, the integration updates every hour. To change this, edit `__init__.py`:
-
-```python
-update_interval=timedelta(hours=1),  # Change to desired interval
-```
-
-Recommended intervals:
-- Hourly: `timedelta(hours=1)` (default)
-- Every 6 hours: `timedelta(hours=6)`
-- Daily: `timedelta(days=1)`
+By default, the integration updates every hour. To change this, go to **Settings → Devices & services → Severn Trent Water → Configure** and set the polling interval (15–1440 minutes). The setting is stored with the integration and survives updates.
 
 Note: Smart meter data has a delay - hourly readings aren't available immediately and yesterday's data is the most recent complete day available.
 
@@ -362,11 +354,11 @@ Existing Yesterday Usage, Week to Date and Previous Week sensors retain their en
 
 Setup accepts an existing API key, a browser Authorization token, or another configured connection to reuse. Choose the account and, where necessary, its meter. Reuse credentials when adding another account: generating a key from a browser token rotates the supplier user's key and may invalidate keys used by other software. Reauthentication verifies account access and updates other configured accounts that share the old key.
 
-Connection failures are retried; rejected credentials start Home Assistant's reauthentication flow. Meter details and water ledger metadata are cached for 24 hours; restarting/reloading clears these caches.
+Connection failures are retried; rejected credentials start Home Assistant's reauthentication flow. If one query fails (for example, payment forecast), the other sensors keep updating and the supplier's error message is logged. Meter details and water ledger metadata are cached for 24 hours; restarting/reloading clears these caches.
 
 ### Known supplier limitation
 
-The official-reading endpoint is deprecated but still works. A live test on 13 September 2026 found that the advertised `POINT_IN_TIME` replacement returns `Unsupported aggregation interval`; unaggregated measurements return interval consumption, not official cumulative readings. Version 1.9.0 retains the working official-reading endpoint. Daily Energy statistics use the supported measurements API independently. Estimated meter readings remain estimates and become unavailable if required history is missing.
+The official-reading endpoint is deprecated but still works. A live test on 13 September 2026 found that the advertised `POINT_IN_TIME` replacement returns `Unsupported aggregation interval`; unaggregated measurements return interval consumption, not official cumulative readings. Version 1.9.0 retains the working official-reading endpoint. Daily Energy statistics use the supported measurements API independently. Estimated meter readings remain estimates; see `missing_periods` for gaps in the supplier's history.
 
 ## Contributing
 

@@ -10,6 +10,12 @@ CONF_ACCOUNT_NUMBER = "account_number"
 CONF_MARKET_SUPPLY_POINT_ID = "market_supply_point_id"
 CONF_DEVICE_ID = "device_id"
 CONF_CAPABILITY_TYPE = "capability_type"
+CONF_SCAN_INTERVAL = "scan_interval"
+
+# Polling interval in minutes
+DEFAULT_SCAN_INTERVAL = 60
+MIN_SCAN_INTERVAL = 15
+MAX_SCAN_INTERVAL = 1440
 
 AUTH_MUTATION = """
 mutation ObtainKrakenToken($input: ObtainJSONWebTokenInput!) {

@@ -18,6 +18,8 @@ from .const import (
     CONF_CAPABILITY_TYPE,
     CONF_DEVICE_ID,
     CONF_MARKET_SUPPLY_POINT_ID,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
 
@@ -78,31 +80,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def async_update_data():
         """Fetch data from API."""
+        failures: list[APIError] = []
+
+        async def fetch(method, *args):
+            # One failing query must not take down every other sensor; only
+            # rejected credentials (AuthenticationError) stop the refresh.
+            try:
+                return await hass.async_add_executor_job(method, *args)
+            except APIError as err:
+                _LOGGER.warning("%s unavailable: %s", method.__name__, err)
+                failures.append(err)
+                return {}
+
         try:
             # Fetch manual readings first to get official reading date
-            manual_data = await hass.async_add_executor_job(api.get_manual_meter_readings)
+            manual_data = await fetch(api.get_manual_meter_readings)
 
             # Fetch balance (do not require it for other sensors to work)
-            balance_data = await hass.async_add_executor_job(api.get_balance)
+            balance_data = await fetch(api.get_balance)
 
             # Fetch API rate limit info (diagnostic)
-            rate_limit_data = await hass.async_add_executor_job(api.get_rate_limit_info)
+            rate_limit_data = await fetch(api.get_rate_limit_info)
 
             # Fetch payment schedule (direct debit etc.)
-            payment_schedule_data = await hass.async_add_executor_job(
-                api.get_current_active_payment_schedule
-            )
+            payment_schedule_data = await fetch(api.get_current_active_payment_schedule)
 
             # Fetch meter details (digits / latest reading metadata) - diagnostic
-            meter_details_data = await hass.async_add_executor_job(api.get_meter_details)
+            meter_details_data = await fetch(api.get_meter_details)
 
             # Fetch outstanding payments
-            outstanding_payment_data = await hass.async_add_executor_job(
-                api.get_outstanding_payment
-            )
+            outstanding_payment_data = await fetch(api.get_outstanding_payment)
 
             # Fetch next upcoming payment forecast
-            next_payment_data = await hass.async_add_executor_job(api.get_next_payment_forecast)
+            next_payment_data = await fetch(api.get_next_payment_forecast)
 
             # Get official reading date for smart meter data fetching
             official_reading_date = None
@@ -110,13 +120,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 official_reading_date = manual_data.get("reading_date")
 
             # Fetch smart meter readings with official date for partial month handling
-            smart_data = await hass.async_add_executor_job(
-                api.get_meter_readings, official_reading_date
-            )
+            smart_data = await fetch(api.get_meter_readings, official_reading_date)
 
             if not any((manual_data, balance_data, payment_schedule_data,
                         meter_details_data, outstanding_payment_data,
                         next_payment_data, smart_data)):
+                if failures:
+                    raise failures[0]
                 raise UpdateFailed("No account or meter data returned by Severn Trent")
 
             if not smart_data and not manual_data:
@@ -173,7 +183,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER,
         name="severn_trent",
         update_method=async_update_data,
-        update_interval=timedelta(hours=1),
+        update_interval=timedelta(
+            minutes=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        ),
     )
     
     try:

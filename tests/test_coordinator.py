@@ -8,6 +8,7 @@ import pytest
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.severn_trent import async_setup_entry, async_unload_entry
+from custom_components.severn_trent.api import APIError
 
 
 @pytest.mark.parametrize("balance,should_fail", [({}, True), ({"balance_gbp": 0}, False)])
@@ -26,7 +27,8 @@ async def test_empty_account_data_fails_but_financial_only_account_works(balance
     async def executor(method, *args):
         return method(*args)
     hass.async_add_executor_job = executor
-    entry = SimpleNamespace(entry_id="entry", data={"api_key": "test", "account_number": "test", "capability_type": "SMART_METER"})
+    entry = SimpleNamespace(entry_id="entry", options={},
+                            data={"api_key": "test", "account_number": "test", "capability_type": "SMART_METER"})
     coordinator = MagicMock()
     async def refresh():
         return await coordinator_factory.call_args.kwargs["update_method"]()
@@ -40,6 +42,73 @@ async def test_empty_account_data_fails_but_financial_only_account_works(balance
             api.close.assert_called_once()
         else:
             assert await async_setup_entry(hass, entry)
+
+
+async def run_setup(api, options=None):
+    """Run setup through the first refresh; return (result or exception, coordinator kwargs)."""
+    api.authenticate.return_value = True
+    for name in GETTERS:
+        getattr(api, name).__name__ = name
+    hass = MagicMock()
+    hass.data = {}
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+
+    async def executor(method, *args):
+        return method(*args)
+    hass.async_add_executor_job = executor
+    entry = SimpleNamespace(entry_id="entry", options=options or {},
+                            data={"api_key": "test", "account_number": "test", "capability_type": "VISUAL"})
+    coordinator = MagicMock()
+    async def refresh():
+        coordinator.data = await coordinator_factory.call_args.kwargs["update_method"]()
+    coordinator.async_config_entry_first_refresh = refresh
+    with patch("custom_components.severn_trent.SevernTrentAPI", return_value=api), patch(
+        "custom_components.severn_trent.DataUpdateCoordinator", return_value=coordinator,
+    ) as coordinator_factory:
+        try:
+            await async_setup_entry(hass, entry)
+            outcome = coordinator.data
+        except Exception as err:  # noqa: BLE001
+            outcome = err
+    return outcome, coordinator_factory.call_args.kwargs
+
+
+GETTERS = ("get_manual_meter_readings", "get_balance", "get_rate_limit_info",
+           "get_current_active_payment_schedule", "get_meter_details",
+           "get_outstanding_payment", "get_next_payment_forecast", "get_meter_readings")
+
+
+@pytest.mark.asyncio
+async def test_one_failing_query_keeps_other_sensors():
+    api = MagicMock()
+    for name in GETTERS:
+        getattr(api, name).return_value = {}
+    api.get_balance.return_value = {"balance_gbp": 1}
+    api.get_next_payment_forecast.side_effect = APIError("Severn Trent could not complete the query: boom")
+    outcome, _ = await run_setup(api)
+    assert outcome["balance"] == {"balance_gbp": 1}
+    assert outcome["next_payment"] == {}
+
+
+@pytest.mark.asyncio
+async def test_all_queries_failing_reports_supplier_error():
+    api = MagicMock()
+    for name in GETTERS:
+        getattr(api, name).side_effect = APIError("Severn Trent could not complete the query: boom")
+    outcome, _ = await run_setup(api)
+    assert isinstance(outcome, UpdateFailed)
+    assert "boom" in str(outcome)
+
+
+@pytest.mark.parametrize("options,minutes", [({}, 60), ({"scan_interval": 15}, 15)])
+@pytest.mark.asyncio
+async def test_polling_interval_comes_from_options(options, minutes):
+    from datetime import timedelta
+    api = MagicMock()
+    for name in GETTERS:
+        getattr(api, name).return_value = {"x": 1}
+    _, kwargs = await run_setup(api, options)
+    assert kwargs["update_interval"] == timedelta(minutes=minutes)
 
 
 @pytest.mark.asyncio

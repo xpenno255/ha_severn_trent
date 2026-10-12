@@ -405,8 +405,10 @@ class SevernTrentEstimatedMeterReadingSensor(SevernTrentBaseSensor):
         else:
             next_month = official_dt.replace(month=official_dt.month + 1, day=1)
 
-        # Require each daily interval in the initial partial month and each
-        # following monthly interval. An absent period is not zero consumption.
+        # Sum each daily interval in the initial partial month and each
+        # following monthly interval. The supplier's history has permanent
+        # gaps, so absent periods are listed and flagged rather than hiding
+        # the estimate entirely.
         daily_by_date = {r.get("date"): r.get("value") for r in daily_readings}
         monthly_by_date = {r.get("start_date"): r.get("value") for r in monthly_readings}
         missing_periods = []
@@ -432,13 +434,13 @@ class SevernTrentEstimatedMeterReadingSensor(SevernTrentBaseSensor):
                 included_monthly.append(value)
             month = (month.replace(day=28) + timedelta(days=4)).replace(day=1)
 
-        if missing_periods:
+        if missing_periods and not included_daily and not included_monthly:
             self._attr_native_value = None
             self._attr_extra_state_attributes = {
                 "last_official_reading": latest_official,
                 "last_official_date": official_date,
                 "missing_periods": missing_periods,
-                "reason": "Usage history does not cover the period since the official reading",
+                "reason": "No usage history since the official reading",
             }
             super()._handle_coordinator_update()
             return
@@ -457,6 +459,8 @@ class SevernTrentEstimatedMeterReadingSensor(SevernTrentBaseSensor):
             "days_since_official": days_since_official,
             "daily_periods_included": len(included_daily),
             "monthly_periods_included": monthly_periods_included,
+            "complete": not missing_periods,
+            "missing_periods": missing_periods,
             "estimation_note": "Official reading + available usage; current month may contain delayed or partial readings",
         }
         super()._handle_coordinator_update()

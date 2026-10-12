@@ -46,5 +46,16 @@
       "already_configured": "Account is already configured",
       "reauth_successful": "Reauthentication was successful"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Severn Trent options",
+        "description": "How often to fetch data from Severn Trent. Severn Trent publishes daily readings once a day, so polling more often than hourly rarely shows new usage.",
+        "data": {
+          "scan_interval": "Polling interval (minutes)"
+        }
+      }
+    }
   }
 }
