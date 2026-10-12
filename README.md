@@ -19,18 +19,13 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 
 ## Requirements
 
-- Home Assistant 2026.9 or newer (v1.9.0 uses the current recorder statistics API)
+- Home Assistant 2026.9 or newer (v1.9 and later use the current recorder statistics API)
 - A Severn Trent online account
 - A temporary Authorization token from your Severn Trent browser session
 
 > **Note:** Daily usage sensors (yesterday, average, week-to-date, previous week) require a smart meter. Accounts with only manual meters will still see balance, payment, and meter reading sensors.
 
-> **v1.8.0**: This release fixes **three critical bugs** that were causing smart meter sensors to show "unavailable":
-> 1. **DateTime double-timezone bug** — all API calls with datetime parameters were sending invalid format like `2026-05-22T00:00:00+00:00Z`, causing 400 errors
-> 2. **Invalid ReadingFrequencyType enum** — the daily readings retry used `"DAY"` instead of the correct `"DAILY"` enum value
-> 3. **MONETARY state class mismatch** — financial sensors used `MEASUREMENT` instead of `TOTAL`, preventing long-term statistics
->
-> It also fixes a blocking call warning and adopts modern HA entity naming (`has_entity_name`). If your smart meter sensors were unavailable, upgrade to this version.
+> **1.9.0 users:** 1.9.0 could fail to set up ("Severn Trent could not complete the query"), hide the estimated meter reading and stop the Energy Dashboard history updating. It has been withdrawn. The fixes are in the **v1.9.1b0** pre-release; see [Installing a pre-release](#installing-a-pre-release). v1.8.0 remains the default HACS version until 1.9.1 is final.
 
 ## Installation
 
@@ -50,6 +45,17 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 10. Restart Home Assistant
 11. Go to Settings → Devices & Services → **Add Integration**
 12. Search for "Severn Trent Water" and follow the setup wizard
+
+### Installing a pre-release
+
+Pre-releases are marked as such on GitHub, so HACS only offers them when you ask:
+
+1. Open HACS and select **Severn Trent Water**
+2. Open the three dots menu and select **Redownload**
+3. Turn on **Need a different version?** and pick the pre-release (for example `v1.9.1b0`)
+4. Click **Download**, then restart Home Assistant
+
+If the pre-release is not in the list, enable pre-releases for this repository first: in HACS 2.x this is the **Pre-release** switch on the repository's device under **Settings → Devices & services → HACS**. To go back, repeat the steps and pick `v1.8.0`.
 
 ### Manual Installation
 
@@ -358,7 +364,7 @@ Connection failures are retried; rejected credentials start Home Assistant's rea
 
 ### Known supplier limitation
 
-The official-reading endpoint is deprecated but still works. A live test on 13 September 2026 found that the advertised `POINT_IN_TIME` replacement returns `Unsupported aggregation interval`; unaggregated measurements return interval consumption, not official cumulative readings. Version 1.9.0 retains the working official-reading endpoint. Daily Energy statistics use the supported measurements API independently. Estimated meter readings remain estimates; see `missing_periods` for gaps in the supplier's history.
+The official-reading endpoint is deprecated but still works. A live test on 13 September 2026 found that the advertised `POINT_IN_TIME` replacement returns `Unsupported aggregation interval`; unaggregated measurements return interval consumption, not official cumulative readings. The integration retains the working official-reading endpoint. Daily Energy statistics use the supported measurements API independently. Estimated meter readings remain estimates; see `missing_periods` for gaps in the supplier's history.
 
 ## Contributing
 
@@ -383,6 +389,8 @@ This is an unofficial integration and is not affiliated with or endorsed by Seve
 For issues, questions, or feature requests, please open an issue on GitHub.
 
 ## Changelog
+
+v1.9.0 and later are recorded in [CHANGELOG.md](CHANGELOG.md).
 
 ### v1.8.0
 
