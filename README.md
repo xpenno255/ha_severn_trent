@@ -25,8 +25,6 @@ A custom Home Assistant integration for monitoring water usage from Severn Trent
 
 > **Note:** Daily usage sensors (yesterday, average, week-to-date, previous week) require a smart meter. Accounts with only manual meters will still see balance, payment, and meter reading sensors.
 
-> **1.9.0 users:** 1.9.0 could fail to set up ("Severn Trent could not complete the query"), hide the estimated meter reading and stop the Energy Dashboard history updating. It has been withdrawn. The fixes are in the **v1.9.1b0** pre-release; see [Installing a pre-release](#installing-a-pre-release). v1.8.0 remains the default HACS version until 1.9.1 is final.
-
 ## Installation
 
 ### HACS Installation (Recommended)
@@ -52,10 +50,10 @@ HACS does not install pre-releases by default, but you can pick one manually:
 
 1. Open HACS and select **Severn Trent Water**
 2. Open the three dots menu and select **Redownload**
-3. Turn on **Need a different version?** and pick the pre-release (for example `v1.9.1b0`)
+3. Turn on **Need a different version?** and pick the pre-release
 4. Click **Download**, then restart Home Assistant
 
-To go back, repeat the steps and pick `v1.8.0`.
+To go back, repeat the steps and pick the previous version.
 
 ### Manual Installation
 
